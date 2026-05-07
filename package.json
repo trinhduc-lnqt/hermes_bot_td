@@ -1,0 +1,16 @@
+{
+  "name": "hermes-telegram-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node ./src/bot.js",
+    "bot": "node ./src/bot.js",
+    "install:browsers": "playwright install chromium"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "playwright": "^1.53.0",
+    "telegraf": "^4.16.3"
+  }
+}

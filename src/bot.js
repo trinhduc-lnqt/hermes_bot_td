@@ -1,4 +1,4 @@
-﻿import net from "node:net";
+import net from "node:net";
 import { Markup, Telegraf } from "telegraf";
 
 import { getAllowedTelegramIds, isAuthorizedTelegramId } from "./access.js";
@@ -22,6 +22,7 @@ import {
   parseWorkScheduleDateInput,
   sortWorkScheduleEntries,
   submitHermesOtp,
+  submitHermesOtpAndGetRoomRevenue,
   submitHermesOtpAndGetWorkSchedule,
   toHermesLocalDate,
   validateHermesLogin,
@@ -57,7 +58,9 @@ const telegramCommands = [
   { command: "kpi", description: "Xem KPI tháng và năm" },
   { command: "sethermes", description: "Lưu tài khoản Hermes" },
   { command: "deletehermes", description: "Xóa tài khoản Hermes" },
+  { command: "clearhermes", description: "Xóa session Hermes để test OTP" },
   { command: "id", description: "Xem Telegram ID" },
+  { command: "testauto", description: "Test tính năng thông báo tự động" },
   { command: "cancel", description: "Hủy thao tác đang đợi" }
 ];
 
@@ -104,6 +107,21 @@ function keyboard() {
     [Markup.button.callback("📅 Lịch làm việc", "action:hermes_work_menu"), Markup.button.callback("📋 Lịch trực", "action:duty_menu")],
     [Markup.button.callback("👤 Tài khoản Hermes", "action:hermes_account_menu")]
   ]);
+}
+
+
+
+
+function extractOtp(text) {
+  const value = String(text || "").trim();
+  const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const directMatch = normalized.match(/ma\s*otp\s*[:?-]?\s*(\d{4,6})/i);
+  if (directMatch) return directMatch[1];
+
+  const plainOtp = value.match(/^\s*(\d{4,6})\s*$/);
+  if (plainOtp) return plainOtp[1];
+
+  return value;
 }
 
 function escapeRegExp(value = "") {
@@ -878,6 +896,7 @@ function homeText(telegramId) {
     "• <code>/kpi</code> - Mở menu KPI theo tháng",
     "• <code>/sethermes</code> - Lưu hoặc đổi tài khoản Hermes",
     "• <code>/deletehermes</code> - Xóa tài khoản Hermes đã lưu",
+    "• <code>/clearhermes</code> - Xóa session Hermes, giữ tài khoản để test OTP",
     "• <code>/id</code> - Xem Telegram ID",
     "• <code>/cancel</code> - Hủy thao tác đang chờ",
     "• <code>/testnotify</code> - Test đọc thông báo Hermes mới nhất",
@@ -1009,21 +1028,23 @@ async function notifyDutyScheduleForDate(date, reasonLabel) {
 }
 
 function getDutyReminderMoment(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: config.timezoneId,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false
+    hourCycle: "h23"
   }).formatToParts(now).reduce((acc, part) => {
     if (part.type !== "literal") acc[part.type] = part.value;
     return acc;
   }, {});
-  const hour = Number(parts.hour);
-  const minute = Number(parts.minute);
-  if (minute !== 0 || ![7, 11, 17].includes(hour)) return null;
+  const hour = parseInt(String(parts.hour).replace(/\D/g, ""), 10);
+  const minute = parseInt(String(parts.minute).replace(/\D/g, ""), 10);
+  if (isNaN(hour) || isNaN(minute)) return null;
+  
+  if (minute > 5 || ![7, 11, 17].includes(hour)) return null;
   const localDate = parseWorkScheduleDateInput(`${parts.year}-${parts.month}-${parts.day}`) || now;
   if (hour === 17) {
     return {
@@ -1040,7 +1061,9 @@ function getDutyReminderMoment(now = new Date()) {
 }
 
 async function checkDutyScheduleReminders() {
-  const reminder = getDutyReminderMoment(new Date());
+  const now = new Date();
+  const reminder = getDutyReminderMoment(now);
+  console.log(`[Auto-Cron] Checking Duty Schedule at ${now.toLocaleTimeString("vi-VN")}`);
   if (!reminder || sentDutyReminderKeys.has(reminder.key)) return;
   sentDutyReminderKeys.add(reminder.key);
   await notifyDutyScheduleForDate(reminder.date, reminder.label);
@@ -1408,7 +1431,16 @@ async function showKpiMonth(ctx, month) {
       storageState: account.hermesSession,
       month
     }));
-    item.roomRevenue = revenueResult.ok ? revenueResult.value : "Đang cập nhật...";
+    if (revenueResult.sessionExpired) await clearHermesSession(ctx.chat.id);
+    if (revenueResult.otpRequired) {
+      pendingActions.set(ctx.chat.id, { stage: "hermes_kpi_otp", month });
+      await replyFresh(ctx, "Hermes y?u c?u OTP khi l?y KPI. S?p g?i m? OTP m?i nh?t, em s? x?c nh?n r?i quay l?i ??ng KPI th?ng n?y. /cancel ?? hu?.");
+      return;
+    }
+    if (revenueResult.storageState) {
+      await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: revenueResult.storageState });
+    }
+    item.roomRevenue = revenueResult.ok ? revenueResult.value : "?ang c?p nh?t...";
 
     await replyFresh(ctx, formatKpiMonthTelegramHtml(monthData, item), {
       parse_mode: "HTML",
@@ -1648,26 +1680,30 @@ async function notifyTodayDashboard() {
 }
 
 function getDashboardReminderMoment(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: config.timezoneId,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false
+    hourCycle: "h23"
   }).formatToParts(now).reduce((acc, part) => {
     if (part.type !== "literal") acc[part.type] = part.value;
     return acc;
   }, {});
-  const hour = Number(parts.hour);
-  const minute = Number(parts.minute);
-  if (hour !== 8 || minute !== 0) return null;
+  const hour = parseInt(String(parts.hour).replace(/\D/g, ""), 10);
+  const minute = parseInt(String(parts.minute).replace(/\D/g, ""), 10);
+  if (isNaN(hour) || isNaN(minute)) return null;
+  
+  if (hour !== 8 || minute > 5) return null;
   return `${parts.year}-${parts.month}-${parts.day}-08-dashboard`;
 }
 
 async function checkDashboardReminder() {
-  const key = getDashboardReminderMoment(new Date());
+  const now = new Date();
+  const key = getDashboardReminderMoment(now);
+  console.log(`[Auto-Cron] Checking Daily Dashboard at ${now.toLocaleTimeString("vi-VN")}`);
   if (!key || sentDashboardReminderKeys.has(key)) return;
   sentDashboardReminderKeys.add(key);
   await notifyTodayDashboard();
@@ -1749,7 +1785,7 @@ bot.command("status", async (ctx) => {
 
 bot.command("cancel", async (ctx) => {
   const pending = pendingActions.get(ctx.chat.id);
-  if (pending?.stage === "hermes_otp" || pending?.stage === "hermes_schedule_otp") {
+  if (["hermes_otp", "hermes_schedule_otp", "hermes_kpi_otp"].includes(pending?.stage)) {
     await cancelHermesOtpSession();
   }
   pendingActions.delete(ctx.chat.id);
@@ -1757,9 +1793,17 @@ bot.command("cancel", async (ctx) => {
 });
 
 bot.command("deletehermes", async (ctx) => {
+  await cancelHermesOtpSession();
   const removed = await deleteHermesAccount(ctx.chat.id);
   pendingActions.delete(ctx.chat.id);
-  await ctx.reply(removed ? "Đã xoá tài khoản Hermes đã lưu." : "Không tìm thấy tài khoản Hermes để xoá.");
+  await ctx.reply(removed ? "?? xo? s?ch t?i kho?n Hermes v? session ?? l?u. S?p d?ng /sethermes ?? ??ng nh?p l?i t? ??u." : "Kh?ng t?m th?y t?i kho?n Hermes ?? xo?.");
+});
+
+bot.command("clearhermes", async (ctx) => {
+  await cancelHermesOtpSession();
+  const cleared = await clearHermesSession(ctx.chat.id);
+  pendingActions.delete(ctx.chat.id);
+  await ctx.reply(cleared ? "?? xo? session Hermes ?? l?u, v?n gi? t?i kho?n. S?p d?ng /lich ho?c /kpi ?? bot ??ng nh?p l?i v? b?t OTP m?i." : "Kh?ng t?m th?y session Hermes ?? xo?. N?u ch?a l?u t?i kho?n th? d?ng /sethermes tr??c nh?.", keyboard());
 });
 
 bot.command("sethermes", async (ctx) => {
@@ -2039,9 +2083,10 @@ bot.action("action:hermes_current_user", async (ctx) => {
 
 bot.action("action:delete_hermes", async (ctx) => {
   await ctx.answerCbQuery();
+  await cancelHermesOtpSession();
   const removed = await deleteHermesAccount(ctx.chat.id);
   pendingActions.delete(ctx.chat.id);
-  await replyFresh(ctx, removed ? "Đã xoá tài khoản Hermes đã lưu." : "Không tìm thấy tài khoản Hermes để xoá.", keyboard());
+  await replyFresh(ctx, removed ? "?? xo? s?ch t?i kho?n Hermes v? session ?? l?u. S?p d?ng /sethermes ?? ??ng nh?p l?i t? ??u." : "Kh?ng t?m th?y t?i kho?n Hermes ?? xo?.", keyboard());
 });
 
 bot.action(/^action:hermes_work_detail:(.+):(\d+)$/, async (ctx) => {
@@ -2165,6 +2210,51 @@ bot.action(/^action:hermes_work_list:(.+)$/, async (ctx) => {
 
 bot.on("text", async (ctx) => {
   const text = (ctx.message?.text || "").trim();
+  
+  if (text === "/testauto" || text.startsWith("/testauto@")) {
+    await ctx.reply("⏳ Đang giả lập chạy thông báo tự động (Cronjob)...");
+    try {
+      await checkDutyScheduleReminders();
+      await checkDashboardReminder();
+      // Bắn thẳng hàm notify để test nếu giờ không khớp
+      await notifyTodayDashboard();
+      await notifyDutyScheduleForDate(new Date(), "Test lệnh tự động");
+      await ctx.reply("✅ Đã chạy xong hàm tự động!");
+    } catch (error) {
+      await ctx.reply(`❌ Lỗi khi test tự động: ${error.message}`);
+    }
+    return;
+  }
+
+  if (text === "/testnotify" || text.startsWith("/testnotify@")) {
+    await ctx.reply("⏳ Đang quét thử thông báo Hermes để xem có lấy được API không...");
+    try {
+      const account = await getHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id });
+      if (!account?.hermesUsername) {
+        await ctx.reply("Sếp chưa lưu tài khoản Hermes.");
+        return;
+      }
+      
+      const result = await enqueue(() => getHermesNotifications({
+        username: account.hermesUsername,
+        password: account.hermesPassword,
+        storageState: account.hermesSession || null
+      }));
+      
+      if (!result.ok) {
+        await ctx.reply(`❌ Quét thất bại: ${result.message || "Lỗi không xác định"}\nSession expired: ${Boolean(result.sessionExpired)}`);
+        return;
+      }
+      
+      const notifs = result.notifications || [];
+      const notifsText = notifs.slice(0, 3).map((n, i) => `${i+1}. [${n.status}] ${n.title}\nKey: ${n.key}\nChi tiết: ${String(n.message).slice(0, 50)}...`).join("\n\n");
+      await ctx.reply(`✅ Quét thành công, tìm thấy ${notifs.length} thông báo mới nhất trên trang.\n\nTop 3 thông báo bot đang đọc được là:\n${notifsText || "Không có thông báo nào."}\n\nSếp kiểm tra xem mấy cái top này có giống với thông báo thực tế Sếp đang thấy trên web không nhé!`);
+    } catch (error) {
+      await ctx.reply(`❌ Lỗi hệ thống: ${error.message}`);
+    }
+    return;
+  }
+
   const pending = pendingActions.get(ctx.chat.id);
   if (!pending) {
     await ctx.reply("Em chưa hiểu lệnh này. Gửi /lich hoặc /menu nhé Sếp.", keyboard());
@@ -2172,7 +2262,7 @@ bot.on("text", async (ctx) => {
   }
 
   if (pending.stage === "hermes_otp") {
-    const otp = ctx.message.text.trim();
+    const otp = extractOtp(ctx.message.text);
     const loadingMessageId = await sendTempMessage(ctx, "Đang xác nhận OTP Hermes...");
     const result = await enqueue(() => submitHermesOtp(otp));
     await deleteTempMessage(ctx, loadingMessageId);
@@ -2181,12 +2271,43 @@ bot.on("text", async (ctx) => {
       return;
     }
     pendingActions.delete(ctx.chat.id);
+    if (result.storageState) {
+      await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
+    }
     if (!result.ok) {
-      await replyFresh(ctx, `Xác nhận OTP lỗi: ${result.message}`, keyboard());
+      const msg = result.storageState 
+        ? `✅ Xác nhận OTP thành công (đã lưu phiên đăng nhập).\n❌ Lỗi tải dữ liệu: ${result.message}`
+        : `❌ Xác nhận OTP lỗi: ${result.message}`;
+      await replyFresh(ctx, msg, keyboard());
       return;
     }
-    if (result.storageState) await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
     await replyFresh(ctx, result.message, keyboard());
+    return;
+  }
+
+  if (pending.stage === "hermes_kpi_otp") {
+    const otp = extractOtp(ctx.message.text);
+    const loadingMessageId = await sendTempMessage(ctx, "?ang x?c nh?n OTP Hermes v? quay l?i KPI...");
+    const result = await enqueue(() => submitHermesOtpAndGetRoomRevenue(otp, pending.month || null));
+    await deleteTempMessage(ctx, loadingMessageId);
+    if (result.otpRequired) {
+      await replyFresh(ctx, result.message);
+      return;
+    }
+    pendingActions.delete(ctx.chat.id);
+    if (result.storageState) {
+      await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
+    }
+    if (!result.ok) {
+      const msg = result.storageState
+        ? `? X?c nh?n OTP th?nh c?ng (?? l?u phi?n ??ng nh?p).
+? Nh?ng l?i khi l?y KPI: ${result.message}
+(S?p b?m l?i KPI th?ng l? ???c v? phi?n ?? ??ng nh?p th?nh c?ng)`
+        : `? X?c nh?n OTP l?i: ${result.message}`;
+      await replyFresh(ctx, msg, keyboard());
+      return;
+    }
+    await showKpiMonth(ctx, pending.month);
     return;
   }
 
@@ -2202,7 +2323,7 @@ bot.on("text", async (ctx) => {
   }
 
   if (pending.stage === "hermes_schedule_otp") {
-    const otp = ctx.message.text.trim();
+    const otp = extractOtp(ctx.message.text);
     const loadingMessageId = await sendTempMessage(ctx, "Đang xác nhận OTP Hermes và lấy lịch...");
     const result = await enqueue(() => submitHermesOtpAndGetWorkSchedule(otp, pending.date || new Date()));
     await deleteTempMessage(ctx, loadingMessageId);
@@ -2211,11 +2332,16 @@ bot.on("text", async (ctx) => {
       return;
     }
     pendingActions.delete(ctx.chat.id);
+    if (result.storageState) {
+      await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
+    }
     if (!result.ok) {
-      await replyFresh(ctx, `Xác nhận OTP/lấy lịch lỗi: ${result.message}`, keyboard());
+      const msg = result.storageState 
+        ? `✅ Xác nhận OTP thành công (đã lưu phiên đăng nhập).\n❌ Nhưng lỗi khi lấy lịch: ${result.message}\n(Sếp có thể thử gửi lại lệnh /lich vì tài khoản đã đăng nhập thành công)`
+        : `❌ Xác nhận OTP lỗi: ${result.message}`;
+      await replyFresh(ctx, msg, keyboard());
       return;
     }
-    if (result.storageState) await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
     const cacheKey = rememberWorkSchedule(ctx, result);
     await replyFresh(ctx, formatWorkScheduleResult(result), {
       parse_mode: "HTML",

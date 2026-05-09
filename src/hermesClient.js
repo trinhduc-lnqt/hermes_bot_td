@@ -1,4 +1,4 @@
-﻿import { chromium } from "playwright";
+import { chromium } from "playwright";
 
 import { config } from "./config.js";
 
@@ -1133,7 +1133,7 @@ async function createHermesBrowserContext(storageState = null) {
   return { browser, context, page, apiResponses };
 }
 
-async function loginHermesPage({ username, password }) {
+async function loginHermesPage({ username, password, purpose = "work_schedule" }) {
   const { browser, context, page, apiResponses } = await createHermesBrowserContext();
 
   await page.goto(config.hermesLoginUrl, { waitUntil: "domcontentloaded", timeout: config.timeoutMs });
@@ -1154,7 +1154,7 @@ async function loginHermesPage({ username, password }) {
     const timer = setTimeout(() => {
       closeActiveHermesSession().catch(() => {});
     }, Math.max(config.hermesOtpTimeoutMs, 60_000));
-    activeHermesSession = { browser, context, page, username, timer, apiResponses, purpose: "work_schedule" };
+    activeHermesSession = { browser, context, page, username, timer, apiResponses, purpose };
     return { ok: false, otpRequired: true, message: "Hermes yeu cau OTP. Hay gui ma OTP de em xac nhan tiep." };
   }
 
@@ -1878,7 +1878,7 @@ export async function getRequestOrderDetailById({ username, password, requestOrd
     }
   }
 
-  const login = await loginHermesPage({ username, password });
+  const login = await loginHermesPage({ username, password, purpose: "work_schedule" });
   if (!login.ok) {
     return { ...login, sessionExpired: login.otpRequired };
   }
@@ -2121,6 +2121,7 @@ export async function submitHermesOtpAndGetWorkSchedule(otp, date = new Date()) 
 
   const session = activeHermesSession;
   const { page } = session;
+  let currentStorageState = null;
   try {
     await fillOtp(page, otp);
     await clickOtpSubmit(page);
@@ -2140,15 +2141,51 @@ export async function submitHermesOtpAndGetWorkSchedule(otp, date = new Date()) 
       return { ok: false, message: "Da gui OTP nhung Hermes chua vao duoc trang sau dang nhap." };
     }
 
+    currentStorageState = await session.context.storageState().catch(() => null);
+
     const result = await readScheduleFromLoggedInPage(page, session.apiResponses || [], date, session.username);
     return {
       ...result,
-      storageState: result.ok ? await session.context.storageState().catch(() => null) : null
+      storageState: await session.context.storageState().catch(() => currentStorageState)
     };
   } catch (error) {
-    return { ok: false, message: error.message || "Khong xac nhan duoc OTP Hermes." };
+    return { ok: false, message: error.message || "Khong xac nhan duoc OTP Hermes.", storageState: currentStorageState };
   } finally {
     await closeActiveHermesSession();
+  }
+}
+
+async function submitOtpForActiveHermesSession(otp) {
+  if (!activeHermesSession) {
+    return { ok: false, expired: true, message: "Khong co phien Hermes nao dang cho OTP hoac phien da het han." };
+  }
+
+  const session = activeHermesSession;
+  const { page } = session;
+  let storageState = null;
+  try {
+    await fillOtp(page, otp);
+    await clickOtpSubmit(page);
+    await page.waitForLoadState("networkidle", { timeout: config.timeoutMs }).catch(() => {});
+    await page.waitForTimeout(1500);
+
+    const errorText = await readFirstText(page, ERROR_SELECTORS);
+    if (errorText) {
+      return { ok: false, message: `OTP Hermes that bai: ${errorText}` };
+    }
+
+    if (await hasVisibleOtpInput(page)) {
+      return { ok: false, otpRequired: true, message: "Hermes van dang cho OTP. Ma vua nhap co the chua dung hoac chua du." };
+    }
+
+    if (!(await isLoggedIn(page))) {
+      return { ok: false, message: "Da gui OTP nhung Hermes chua vao duoc trang sau dang nhap." };
+    }
+
+    storageState = await session.context.storageState().catch(() => null);
+    return { ok: true, session, storageState };
+  } catch (error) {
+    return { ok: false, message: error.message || "Khong xac nhan duoc OTP Hermes.", storageState };
   }
 }
 
@@ -2156,142 +2193,160 @@ export async function cancelHermesOtpSession() {
   await closeActiveHermesSession();
 }
 
-export async function getHermesRoomRevenue({ username, password, storageState = null, month = null }) {
+async function readRoomRevenueFromPage(page, context, month = null) {
   const revenueMonthLabel = /^\d{4}_\d{2}$/.test(String(month || ""))
     ? `${Number(String(month).slice(5, 7))}/${String(month).slice(0, 4)}`
     : "";
   const url = "https://hermes.ipos.vn/report-commission-sale";
-  let browser, context, page;
-  
-  try {
-    if (storageState) {
-      const session = await createHermesBrowserContext(storageState);
-      browser = session.browser;
-      context = session.context;
-      page = session.page;
-    } else {
-      const login = await loginHermesPage({ username, password });
-      if (!login.ok) return { ok: false, otpRequired: login.otpRequired, message: "Không thể đăng nhập Hermes để lấy doanh thu." };
-      browser = login.browser;
-      context = login.context;
-      page = login.page;
-    }
 
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
-    
-    const isLoginPage = page.url().includes("/login") || await page.locator("input[type='password']").isVisible().catch(() => false);
-    
-    if (isLoginPage && storageState) {
-      return { ok: false, message: "Phiên đăng nhập Hermes đã hết hạn, vui lòng dùng lệnh /lich để cập nhật lại phiên." };
-    }
+  await page.goto(url, { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
 
-    if (isLoginPage) {
-      const login = await loginHermesPage({ username, password });
-      if (!login.ok) return { ok: false, otpRequired: login.otpRequired, message: login.message || "Không thể đăng nhập Hermes." };
-      await login.page.goto(url, { waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
-      page = login.page;
-      context = login.context;
-      browser = login.browser;
-    }
+  const isLoginPage = page.url().includes("/login") || await page.locator("input[type='password']").isVisible().catch(() => false);
+  if (isLoginPage || await hasVisibleOtpInput(page)) {
+    return { ok: false, sessionExpired: true, message: "Phiên Hermes đã hết hạn hoặc cần đăng nhập lại để lấy KPI." };
+  }
 
-    await page.waitForTimeout(3000);
+  await page.waitForTimeout(3000);
 
-    const supportResponsePromise = page.waitForResponse(
-      response => /get-monthly-sale-commission/i.test(response.url()) && /type=SUPPORT/i.test(response.url()),
-      { timeout: 15000 }
-    ).catch(() => null);
+  const supportResponsePromise = page.waitForResponse(
+    response => /get-monthly-sale-commission/i.test(response.url()) && /type=SUPPORT/i.test(response.url()),
+    { timeout: 15000 }
+  ).catch(() => null);
 
-    await page.getByText("Lọc").first().click().catch(() => {});
+  await page.getByText("Lọc").first().click().catch(() => {});
+  await page.waitForTimeout(500);
+  const groupSelect = page.locator("mat-select").first();
+  if (await groupSelect.isVisible().catch(() => false)) {
+    await groupSelect.click().catch(() => {});
+    await page.waitForTimeout(300);
+    await page.getByRole("option", { name: /^Support$/ }).click().catch(async () => {
+      await page.locator("mat-option").filter({ hasText: "Support" }).first().click().catch(() => {});
+    });
     await page.waitForTimeout(500);
-    const groupSelect = page.locator("mat-select").first();
-    if (await groupSelect.isVisible().catch(() => false)) {
-      await groupSelect.click().catch(() => {});
+    if (revenueMonthLabel) {
+      const [targetMonthText, targetYearText] = revenueMonthLabel.split("/");
+      const targetMonth = Number(targetMonthText);
+      const targetYear = Number(targetYearText);
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      await page.locator(".mat-dialog-container input").first().click().catch(() => {});
       await page.waitForTimeout(300);
-      await page.getByRole("option", { name: /^Support$/ }).click().catch(async () => {
-        await page.locator("mat-option").filter({ hasText: "Support" }).first().click().catch(() => {});
-      });
-      await page.waitForTimeout(500);
-      if (revenueMonthLabel) {
-        const [targetMonthText, targetYearText] = revenueMonthLabel.split("/");
-        const targetMonth = Number(targetMonthText);
-        const targetYear = Number(targetYearText);
-        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        await page.locator(".mat-dialog-container input").first().click().catch(() => {});
-        await page.waitForTimeout(300);
-        for (let i = 0; i < 8; i++) {
-          const calendarText = await page.locator("body").innerText().catch(() => "");
-          const yearMatch = calendarText.match(/keyboard_arrow_left\s*(\d{4})\s*keyboard_arrow_right/);
-          const currentYear = yearMatch ? Number(yearMatch[1]) : targetYear;
-          if (currentYear === targetYear) break;
-          const buttonSelector = currentYear > targetYear ? ".mat-calendar-previous-button" : ".mat-calendar-next-button";
-          await page.locator(buttonSelector).click().catch(() => {});
-          await page.waitForTimeout(250);
-        }
-        await page.evaluate((monthName) => {
-          const candidates = [...document.querySelectorAll(".mat-dialog-container *")]
-            .filter(el => (el.innerText || el.textContent || "").trim() === monthName);
-          const target = candidates.find(el => el.offsetParent !== null) || candidates[0];
-          target?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-        }, monthNames[targetMonth - 1]).catch(() => {});
-        await page.waitForTimeout(500);
+      for (let i = 0; i < 8; i++) {
+        const calendarText = await page.locator("body").innerText().catch(() => "");
+        const yearMatch = calendarText.match(/keyboard_arrow_left\s*(\d{4})\s*keyboard_arrow_right/);
+        const currentYear = yearMatch ? Number(yearMatch[1]) : targetYear;
+        if (currentYear === targetYear) break;
+        const buttonSelector = currentYear > targetYear ? ".mat-calendar-previous-button" : ".mat-calendar-next-button";
+        await page.locator(buttonSelector).click().catch(() => {});
+        await page.waitForTimeout(250);
       }
-      await page.getByText("Tìm kiếm").last().click().catch(() => {});
-      await supportResponsePromise;
-      await page.waitForTimeout(2500);
+      await page.evaluate((monthName) => {
+        const candidates = [...document.querySelectorAll(".mat-dialog-container *")]
+          .filter(el => (el.innerText || el.textContent || "").trim() === monthName);
+        const target = candidates.find(el => el.offsetParent !== null) || candidates[0];
+        target?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      }, monthNames[targetMonth - 1]).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+    await page.getByText("Tìm kiếm").last().click().catch(() => {});
+    await supportResponsePromise;
+    await page.waitForTimeout(2500);
+  }
+
+  const result = await page.evaluate(() => {
+    const targetEmail = "support.hn@ipos.vn";
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const moneyValue = (value) => {
+      const text = String(value || "").replace(/\s+/g, " ").trim();
+      return text && text !== "-" ? text : "";
+    };
+    const headers = Array.from(document.querySelectorAll("th")).map(th => th.innerText.trim());
+    const rows = Array.from(document.querySelectorAll("tr"))
+      .map(row => Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim()))
+      .filter(cells => cells.length);
+
+    if (!headers.length || !rows.length) {
+      return { ok: false, message: "Không tìm thấy bảng doanh thu trên Hermes." };
     }
 
-    const result = await page.evaluate(() => {
-      const targetEmail = "support.hn@ipos.vn";
-      const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const moneyValue = (value) => {
-        const text = String(value || "").replace(/\s+/g, " ").trim();
-        return text && text !== "-" ? text : "";
-      };
-      const headers = Array.from(document.querySelectorAll("th")).map(th => th.innerText.trim());
-      const rows = Array.from(document.querySelectorAll("tr"))
-        .map(row => Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim()))
-        .filter(cells => cells.length);
-
-      if (!headers.length || !rows.length) {
-        return { ok: false, message: "Không tìm thấy bảng doanh thu trên Hermes." };
-      }
-
-      const findHeader = (...patterns) => headers.findIndex((header) => {
-        const text = normalize(header);
-        return patterns.some((pattern) => text.includes(pattern));
-      });
-
-      const revenueIndexes = [
-        findHeader("hh tiêu chuẩn"),
-        findHeader("hh theo kpi"),
-        findHeader("thực nhận"),
-        findHeader("dt tính hh")
-      ].filter(index => index >= 0);
-
-      const supportRow = rows.find(cells => normalize(cells.join(" ")).includes(targetEmail));
-      if (supportRow) {
-        for (const index of revenueIndexes) {
-          const value = moneyValue(supportRow[index]);
-          if (value) return { ok: true, value, source: targetEmail };
-        }
-      }
-
-      const totalRow = rows.find(cells => normalize(cells[0]).includes("tổng cộng"));
-      if (totalRow) {
-        for (const index of revenueIndexes) {
-          const value = moneyValue(totalRow[index]);
-          if (value) return { ok: true, value, source: "TỔNG CỘNG" };
-        }
-      }
-
-      return { ok: false, message: "Không tìm thấy doanh thu nhóm Support trên Hermes." };
+    const findHeader = (...patterns) => headers.findIndex((header) => {
+      const text = normalize(header);
+      return patterns.some((pattern) => text.includes(pattern));
     });
 
-    return { ...result, storageState: await context.storageState().catch(() => null) };
+    const revenueIndexes = [
+      findHeader("hh tiêu chuẩn"),
+      findHeader("hh theo kpi"),
+      findHeader("thực nhận"),
+      findHeader("dt tính hh")
+    ].filter(index => index >= 0);
+
+    const supportRow = rows.find(cells => normalize(cells.join(" ")).includes(targetEmail));
+    if (supportRow) {
+      for (const index of revenueIndexes) {
+        const value = moneyValue(supportRow[index]);
+        if (value) return { ok: true, value, source: targetEmail };
+      }
+    }
+
+    const totalRow = rows.find(cells => normalize(cells[0]).includes("tổng cộng"));
+    if (totalRow) {
+      for (const index of revenueIndexes) {
+        const value = moneyValue(totalRow[index]);
+        if (value) return { ok: true, value, source: "TỔNG CỘNG" };
+      }
+    }
+
+    return { ok: false, message: "Không tìm thấy doanh thu nhóm Support trên Hermes." };
+  });
+
+  return { ...result, storageState: await context.storageState().catch(() => null) };
+}
+
+export async function submitHermesOtpAndGetRoomRevenue(otp, month = null) {
+  const verified = await submitOtpForActiveHermesSession(otp);
+  if (!verified.ok) {
+    if (!verified.otpRequired) await closeActiveHermesSession();
+    return verified;
+  }
+  try {
+    const result = await readRoomRevenueFromPage(verified.session.page, verified.session.context, month);
+    return { ...result, storageState: result.storageState || verified.storageState };
   } catch (error) {
-    return { ok: false, message: `Lỗi lấy doanh thu: ${error.message}` };
+    return { ok: false, message: `Lỗi lấy doanh thu sau OTP: ${error.message}`, storageState: verified.storageState };
   } finally {
-    if (browser) await browser.close().catch(() => {});
+    await closeActiveHermesSession();
+  }
+}
+
+export async function getHermesRoomRevenue({ username, password, storageState = null, month = null }) {
+  let session = null;
+  let login = null;
+  try {
+    if (storageState) {
+      session = await createHermesBrowserContext(storageState);
+      const result = await readRoomRevenueFromPage(session.page, session.context, month);
+      if (result.ok || !result.sessionExpired) return result;
+      await session.browser.close().catch(() => {});
+      session = null;
+    }
+
+    login = await loginHermesPage({ username, password, purpose: "kpi_room_revenue" });
+    if (!login.ok) {
+      return {
+        ...login,
+        sessionExpired: Boolean(storageState) || login.otpRequired,
+        message: login.message || "Kh?ng th? ??ng nh?p Hermes ?? l?y doanh thu."
+      };
+    }
+
+    return await readRoomRevenueFromPage(login.page, login.context, month);
+  } catch (error) {
+    return { ok: false, message: `L?i l?y doanh thu: ${error.message}` };
+  } finally {
+    if (session) await session.browser.close().catch(() => {});
+    if (login?.browser && (!activeHermesSession || activeHermesSession.browser !== login.browser)) {
+      await login.browser.close().catch(() => {});
+    }
   }
 }
 

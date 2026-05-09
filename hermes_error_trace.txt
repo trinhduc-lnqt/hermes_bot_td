@@ -1,0 +1,52 @@
+2026-05-09T12:47:28.002Z
+ReferenceError: extractOtp is not defined
+    at file:///D:/Codex/Ihr_hermes/hermes_bot/src/bot.js:2311:17
+    at D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:165:111
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+
+2026-05-09T12:49:24.189Z
+ReferenceError: extractOtp is not defined
+    at file:///D:/Codex/Ihr_hermes/hermes_bot/src/bot.js:2311:17
+    at D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:165:111
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+
+2026-05-09T12:56:39.662Z
+Error: 400: Bad Request: query is too old and response timeout expired or query ID is invalid
+    at Telegram.callApi (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\core\network\client.js:315:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async file:///D:/Codex/Ihr_hermes/hermes_bot/src/bot.js:2053:3
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+
+2026-05-09T12:56:40.064Z
+Error: 400: Bad Request: query is too old and response timeout expired or query ID is invalid
+    at Telegram.callApi (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\core\network\client.js:315:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async file:///D:/Codex/Ihr_hermes/hermes_bot/src/bot.js:2053:3
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+    at async D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:519:21
+    at async execute (D:\Codex\Ihr_hermes\node_modules\telegraf\lib\composer.js:518:17)
+

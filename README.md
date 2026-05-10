@@ -125,3 +125,27 @@ Sau khi chạy, bot tạo/cập nhật:
 - `data/hermes-users.json`: tài khoản Telegram/Hermes, session, trạng thái notification.
 
 Không commit thư mục `data/` lên GitHub.
+
+## 10. Cập nhật bot từ GitHub
+
+Sau khi đẩy code mới lên GitHub, mở Telegram chat với bot và gõ:
+
+```bash
+/update
+```
+
+Cơ chế update sẽ:
+
+- Kiểm tra repo local có thay đổi chưa commit không; nếu có thì dừng để tránh ghi đè.
+- `git fetch` và `git pull --ff-only` từ đúng branch đang chạy.
+- Tự chạy `npm install` nếu `package.json` hoặc `package-lock.json` thay đổi.
+- Thoát tiến trình sau khi cập nhật để PM2/service tự khởi động lại bản mới.
+
+Khuyến nghị chạy bot bằng PM2 để bot tự bật lại sau khi `/update`:
+
+```bash
+pm2 start src/bot.js --name hermes-bot
+pm2 save
+```
+
+Nếu chạy bằng `npm start` thủ công, sau khi `/update` thành công cần tự chạy lại `npm start`.

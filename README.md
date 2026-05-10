@@ -149,3 +149,30 @@ pm2 save
 ```
 
 Nếu chạy bằng `npm start` thủ công, sau khi `/update` thành công cần tự chạy lại `npm start`.
+
+### Khi VPS vẫn đang chạy bản cũ
+
+Nếu bot trên Telegram chưa nhận `/update`, nghĩa là VPS đang chạy code cũ chưa có lệnh update. SSH vào VPS và chạy thủ công một lần:
+
+```bash
+cd /duong/dan/toi/hermes_bot
+git status
+git pull --ff-only origin main
+npm install
+pm2 restart hermes-bot --update-env
+pm2 save
+```
+
+Nếu repo của anh dùng branch `master` thay vì `main`, đổi `main` thành `master`.
+
+Hoặc dùng script có sẵn:
+
+```bash
+cd /duong/dan/toi/hermes_bot
+bash ./scripts/update-vps.sh
+```
+
+Sau lần cập nhật thủ công này, bot sẽ có lệnh `/update` để các lần sau cập nhật trực tiếp từ Telegram.
+
+Nếu `git status` báo có file local bị sửa, kiểm tra kỹ trước khi pull để tránh mất cấu hình. File `.env` và thư mục `data/` đã được ignore nên bình thường không cản update.
+

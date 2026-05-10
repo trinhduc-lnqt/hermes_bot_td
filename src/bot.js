@@ -995,7 +995,8 @@ function buildStatusText() {
   return [
     "Bot lá»‹ch Hermes: online",
     `Báº¯t Ä‘áº§u: ${formatDateTime(startedAt)}`,
-    `Uptime: ${formatDuration(Date.now() - startedAt.getTime())}`
+    `Uptime: ${formatDuration(Date.now() - startedAt.getTime())}`,
+    `Thu muc chay: ${process.cwd()}`
   ].join("\n");
 }
 

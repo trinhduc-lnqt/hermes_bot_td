@@ -1,4 +1,4 @@
-﻿import net from "node:net";
+import net from "node:net";
 import { Markup, Telegraf } from "telegraf";
 
 import { getAllowedTelegramIds, isAuthorizedTelegramId } from "./access.js";
@@ -52,18 +52,18 @@ const sentDutyReminderKeys = new Set();
 const sentDashboardReminderKeys = new Set();
 
 const telegramCommands = [
-  { command: "start", description: "Má»Ÿ menu Hermes" },
-  { command: "today", description: "Xem tá»•ng há»£p hÃ´m nay" },
-  { command: "lich", description: "Xem lá»‹ch lÃ m viá»‡c" },
-  { command: "truc", description: "Xem lá»‹ch trá»±c tá»« Google Sheet" },
-  { command: "kpi", description: "Xem KPI thÃ¡ng vÃ  nÄƒm" },
-  { command: "sethermes", description: "LÆ°u tÃ i khoáº£n Hermes" },
-  { command: "deletehermes", description: "XÃ³a tÃ i khoáº£n Hermes" },
-  { command: "clearhermes", description: "XÃ³a session Hermes Ä‘á»ƒ test OTP" },
+  { command: "start", description: "Mở menu Hermes" },
+  { command: "today", description: "Xem tổng hợp hôm nay" },
+  { command: "lich", description: "Xem lịch làm việc" },
+  { command: "truc", description: "Xem lịch trực từ Google Sheet" },
+  { command: "kpi", description: "Xem KPI tháng và năm" },
+  { command: "sethermes", description: "Lưu tài khoản Hermes" },
+  { command: "deletehermes", description: "Xóa tài khoản Hermes" },
+  { command: "clearhermes", description: "Xóa session Hermes để test OTP" },
   { command: "id", description: "Xem Telegram ID" },
   { command: "update", description: "Cap nhat bot tu GitHub" },
-  { command: "testauto", description: "Test tÃ­nh nÄƒng thÃ´ng bÃ¡o tá»± Ä‘á»™ng" },
-  { command: "cancel", description: "Há»§y thao tÃ¡c Ä‘ang Ä‘á»£i" }
+  { command: "testauto", description: "Test tính năng thông báo tự động" },
+  { command: "cancel", description: "Hủy thao tác đang đợi" }
 ];
 
 function enqueue(task) {
@@ -88,11 +88,11 @@ function isStartLikeUpdate(ctx) {
 function buildUnauthorizedText(ctx) {
   const telegramId = getTelegramId(ctx);
   return [
-    "Telegram ID cá»§a Sáº¿p:",
-    telegramId || "(khÃ´ng xÃ¡c Ä‘á»‹nh)",
+    "Telegram ID của Sếp:",
+    telegramId || "(không xác định)",
     "",
-    "Bot lá»‹ch Hermes Ä‘ang khoÃ¡.",
-    "Gá»­i ID nÃ y cho admin Ä‘á»ƒ Ä‘Æ°á»£c thÃªm vÃ o danh sÃ¡ch cho phÃ©p."
+    "Bot lịch Hermes đang khoá.",
+    "Gửi ID này cho admin để được thêm vào danh sách cho phép."
   ].join("\n");
 }
 
@@ -105,9 +105,9 @@ async function isAllowedUser(ctx) {
 
 function keyboard() {
   return Markup.inlineKeyboard([
-    [Markup.button.callback("ðŸ“Œ Tá»•ng há»£p", "action:today_dashboard"), Markup.button.callback("ðŸŽ¯ KPI", "action:hermes_kpi")],
-    [Markup.button.callback("ðŸ“… Lá»‹ch lÃ m viá»‡c", "action:hermes_work_menu"), Markup.button.callback("ðŸ“‹ Lá»‹ch trá»±c", "action:duty_menu")],
-    [Markup.button.callback("ðŸ‘¤ TÃ i khoáº£n Hermes", "action:hermes_account_menu")]
+    [Markup.button.callback("📌 Tổng hợp", "action:today_dashboard"), Markup.button.callback("🎯 KPI", "action:hermes_kpi")],
+    [Markup.button.callback("📅 Lịch làm việc", "action:hermes_work_menu"), Markup.button.callback("📋 Lịch trực", "action:duty_menu")],
+    [Markup.button.callback("👤 Tài khoản Hermes", "action:hermes_account_menu")]
   ]);
 }
 
@@ -132,7 +132,7 @@ function escapeRegExp(value = "") {
 
 function compactButtonLabel(text, maxLength = 42) {
   const value = String(text || "").replace(/\s+/g, " ").trim();
-  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}â€¦` : value;
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
 function formatMenuDateLabel(date = new Date()) {
@@ -265,11 +265,11 @@ function dutyMenuKeyboard() {
 function accountMenuKeyboard() {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback("ðŸ‘¤ Xem thÃ´ng tin", "action:hermes_current_user"),
-      Markup.button.callback("ðŸ” Cáº­p nháº­t", "action:hermes_account"),
-      Markup.button.callback("ðŸ—‘ï¸ XoÃ¡ tÃ i khoáº£n", "action:delete_hermes")
+      Markup.button.callback("👤 Xem thông tin", "action:hermes_current_user"),
+      Markup.button.callback("🔐 Cập nhật", "action:hermes_account"),
+      Markup.button.callback("🗑️ Xoá tài khoản", "action:delete_hermes")
     ],
-    [Markup.button.callback("ðŸ  Vá» menu chÃ­nh", "action:menu")]
+    [Markup.button.callback("🏠 Về menu chính", "action:menu")]
   ]);
 }
 
@@ -292,16 +292,16 @@ function formatDuration(durationMs) {
 function formatHermesAccountStatus(account) {
   if (!account?.hermesUsername) {
     return [
-      "ChÆ°a lÆ°u tÃ i khoáº£n Hermes.",
-      "Gá»­i /sethermes Ä‘á»ƒ thÃªm tÃ i khoáº£n."
+      "Chưa lưu tài khoản Hermes.",
+      "Gửi /sethermes để thêm tài khoản."
     ].join("\n");
   }
   return [
-    `User Hermes Ä‘ang lÆ°u: ${account.hermesUsername}`,
-    `Telegram: ${account.telegramName || "(khÃ´ng cÃ³ tÃªn)"}${account.telegramUsername ? ` (@${account.telegramUsername})` : ""}`,
-    `Chat ID: ${account.chatId || "(khÃ´ng cÃ³)"}`,
-    `Cáº­p nháº­t: ${account.updatedAt ? formatDateTime(new Date(account.updatedAt)) : "khÃ´ng rÃµ"}`,
-    `Session Hermes: ${account.hermesSession ? "Ä‘ang cÃ³" : "chÆ°a cÃ³"}`
+    `User Hermes đang lưu: ${account.hermesUsername}`,
+    `Telegram: ${account.telegramName || "(không có tên)"}${account.telegramUsername ? ` (@${account.telegramUsername})` : ""}`,
+    `Chat ID: ${account.chatId || "(không có)"}`,
+    `Cập nhật: ${account.updatedAt ? formatDateTime(new Date(account.updatedAt)) : "không rõ"}`,
+    `Session Hermes: ${account.hermesSession ? "đang có" : "chưa có"}`
   ].join("\n");
 }
 
@@ -309,7 +309,7 @@ async function deleteLastBotMessage(ctx) {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
-  // XoÃ¡ tin nháº¯n vá»«a báº¥m nÃºt (náº¿u cÃ³) Ä‘á»ƒ trÃ¡nh dá»‘i máº¯t
+  // Xoá tin nhắn vừa bấm nút (nếu có) để tránh dối mắt
   if (ctx.callbackQuery?.message?.message_id) {
     try {
       await ctx.telegram.deleteMessage(chatId, ctx.callbackQuery.message.message_id);
@@ -319,7 +319,7 @@ async function deleteLastBotMessage(ctx) {
   const lastMessageId = lastBotMessageByChat.get(chatId);
   if (!lastMessageId) return;
 
-  // Náº¿u tin nháº¯n cuá»‘i cÃ¹ng khÃ¡c vá»›i tin nháº¯n vá»«a báº¥m thÃ¬ xoÃ¡ luÃ´n cáº£ nÃ³
+  // Nếu tin nhắn cuối cùng khác với tin nhắn vừa bấm thì xoá luôn cả nó
   if (lastMessageId !== ctx.callbackQuery?.message?.message_id) {
     try {
       await ctx.telegram.deleteMessage(chatId, lastMessageId);
@@ -376,20 +376,20 @@ async function fetchDutyScheduleByDate(date = new Date()) {
 
   const response = await fetch(DUTY_SHEET_GVIZ_URL);
   if (!response.ok) {
-    throw new Error(`KhÃ´ng táº£i Ä‘Æ°á»£c Google Sheet lá»‹ch trá»±c (${response.status}).`);
+    throw new Error(`Không tải được Google Sheet lịch trực (${response.status}).`);
   }
 
   const text = await response.text();
   const jsonText = text.match(/setResponse\((.*)\);?\s*$/s)?.[1];
   if (!jsonText) {
-    throw new Error("Google Sheet tráº£ dá»¯ liá»‡u khÃ´ng Ä‘Ãºng Ä‘á»‹nh dáº¡ng gviz.");
+    throw new Error("Google Sheet trả dữ liệu không đúng định dạng gviz.");
   }
 
   let data;
   try {
     data = JSON.parse(jsonText);
   } catch {
-    throw new Error("KhÃ´ng parse Ä‘Æ°á»£c dá»¯ liá»‡u lá»‹ch trá»±c tá»« Google Sheet.");
+    throw new Error("Không parse được dữ liệu lịch trực từ Google Sheet.");
   }
 
   const rows = (data?.table?.rows || [])
@@ -408,8 +408,8 @@ async function fetchDutyScheduleByDate(date = new Date()) {
   const firstRow = rows[0];
   const weekday = String(firstRow[1] || "").trim();
   const note = rows.map((row) => String(row[7] || "").trim()).filter(Boolean).join("\n");
-  const isHoliday = /nghá»‰ lá»…/i.test(note);
-  const isSundayShift = rows.some((row) => /chá»§ nháº­t/i.test(String(row[1] || "").trim()));
+  const isHoliday = /nghỉ lễ/i.test(note);
+  const isSundayShift = rows.some((row) => /chủ nhật/i.test(String(row[1] || "").trim()));
 
   if (isSundayShift) {
     const sundayShifts = rows.map((row) => ({
@@ -473,10 +473,10 @@ function formatDutyHeader(result) {
   const weekday = String(result.weekday || "").trim().replace(/\s*-\s*Ca\s*\d+.*$/i, "");
 
   return [
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
-    `ðŸ“‹ <b>Lá»‹ch trá»±c ${displayDate}</b>`,
-    `ðŸ—“ï¸ <b>${escapeHtml(weekday).toUpperCase()}</b>`,
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”"
+    "━━━━━━━━━━━━━━━━━━━━",
+    `📋 <b>Lịch trực ${displayDate}</b>`,
+    `🗓️ <b>${escapeHtml(weekday).toUpperCase()}</b>`,
+    "━━━━━━━━━━━━━━━━━━━━"
   ];
 }
 
@@ -484,12 +484,12 @@ function formatDutyInlinePeople(values = [], options = {}) {
   const items = values.map((item) => {
     const name = String(item || "").trim();
     if (!name || name === "-") return "";
-    // Máº¹o: DÃ¹ng link ná»™i bá»™ Ä‘á»ƒ táº¡o mÃ u xanh (Click vÃ o chá»‰ má»Ÿ láº¡i Bot hoáº·c khÃ´ng Ä‘i Ä‘Ã¢u xa)
+    // Mẹo: Dùng link nội bộ để tạo màu xanh (Click vào chỉ mở lại Bot hoặc không đi đâu xa)
     return `<a href="https://t.me/share/url?url=${encodeURIComponent(name)}">${name}</a>`;
   }).filter(Boolean);
   
   if (!items.length) return "-";
-  const joined = items.join(" â€¢ ");
+  const joined = items.join(" • ");
   return options.bold ? `<b>${joined}</b>` : joined;
 }
 
@@ -521,11 +521,11 @@ function findUserDutyRoles(result, fullName) {
     const sName = String(scheduleNameRaw).toLowerCase().trim();
     if (!sName) return false;
 
-    // TÃ¡ch táº¥t cáº£ cÃ¡c tá»« trong tÃªn trÃªn lá»‹ch (xá»­ lÃ½ cáº£ dáº¥u phÃ¢n cÃ¡ch â€¢ ,)
-    const sParts = sName.split(/[\sâ€¢,]+/).filter(Boolean);
+    // Tách tất cả các từ trong tên trên lịch (xử lý cả dấu phân cách • ,)
+    const sParts = sName.split(/[\s•,]+/).filter(Boolean);
     
-    // Kiá»ƒm tra xem cÃ³ báº¥t ká»³ tá»« nÃ o trong lá»‹ch khá»›p hoÃ n toÃ n vá»›i má»™t tá»« trong tÃªn sáº¿p khÃ´ng
-    // VÃ­ dá»¥: Lá»‹ch ghi "Äá»©c" khá»›p vá»›i "Trá»‹nh Äá»©c" (vÃ¬ cÃ¹ng cÃ³ tá»« "Ä‘á»©c")
+    // Kiểm tra xem có bất kỳ từ nào trong lịch khớp hoàn toàn với một từ trong tên sếp không
+    // Ví dụ: Lịch ghi "Đức" khớp với "Trịnh Đức" (vì cùng có từ "đức")
     return sParts.some(sPart => viewerParts.includes(sPart));
   };
 
@@ -538,24 +538,24 @@ function findUserDutyRoles(result, fullName) {
   if (result.isHoliday) {
     const lines = String(result.note || "").split(/\r?\n/);
     for (const line of lines) {
-      const match = line.match(/^(Nghá»‰ lá»…[^:]*|Ca\s*\d+[^:]*):\s*(.*)$/i);
+      const match = line.match(/^(Nghỉ lễ[^:]*|Ca\s*\d+[^:]*):\s*(.*)$/i);
       if (match && isUserMatch(match[2])) {
         roles.push(match[1]);
       } else if (!match && isUserMatch(line)) {
-        roles.push("Trá»±c lá»… (Ghi chÃº)");
+        roles.push("Trực lễ (Ghi chú)");
       }
     }
   } else if (result.isSundayShift) {
     (result.sundayShifts || []).forEach(shift => {
-      if (checkValue(shift.people)) roles.push(shift.label || "Trá»±c Chá»§ Nháº­t");
-      if (checkValue(shift.server)) roles.push("Trá»±c server (Chá»§ Nháº­t)");
+      if (checkValue(shift.people)) roles.push(shift.label || "Trực Chủ Nhật");
+      if (checkValue(shift.server)) roles.push("Trực server (Chủ Nhật)");
     });
   } else {
-    if (checkValue(result.dutyNight)) roles.push("Trá»±c tá»‘i");
-    if (checkValue(result.morningPrimary)) roles.push("Trá»±c sÃ¡ng");
-    if (checkValue(result.morningSupport)) roles.push("Trá»±c hÃ nh chÃ­nh");
-    if (checkValue(result.noon)) roles.push("Trá»±c trÆ°a");
-    if (checkValue(result.afterHoursServer)) roles.push("Trá»±c server");
+    if (checkValue(result.dutyNight)) roles.push("Trực tối");
+    if (checkValue(result.morningPrimary)) roles.push("Trực sáng");
+    if (checkValue(result.morningSupport)) roles.push("Trực hành chính");
+    if (checkValue(result.noon)) roles.push("Trực trưa");
+    if (checkValue(result.afterHoursServer)) roles.push("Trực server");
   }
 
   return [...new Set(roles)];
@@ -590,7 +590,7 @@ function formatDutyNoteLines(note) {
   return groups.map((group) => {
     const title = String(group.title || "").trim();
     const value = group.items.length ? formatDutyInlinePeople(group.items, { bold: true }) : "";
-    return formatDutyAlignedLine("ðŸ“", title, value);
+    return formatDutyAlignedLine("📍", title, value);
   });
 }
 
@@ -605,24 +605,24 @@ function formatHolidayDutyScheduleHtml(result) {
   let hasNoteTitle = false;
 
   for (const line of lines) {
-    const match = line.match(/^(Nghá»‰ lá»…[^:]*|Ca\s*\d+[^:]*):\s*(.*)$/i);
+    const match = line.match(/^(Nghỉ lễ[^:]*|Ca\s*\d+[^:]*):\s*(.*)$/i);
     if (match) {
       const [, title, value] = match;
-      const icon = /ca\s*1/i.test(title) ? "â˜€ï¸" : /ca\s*2/i.test(title) ? "ðŸŒ¤ï¸" : "ðŸŽŠ";
-      const label = /ca\s*1/i.test(title) ? "Trá»±c ca 1" : /ca\s*2/i.test(title) ? "Trá»±c ca 2" : title;
-      const people = String(value || "").split(/[â€¢,]/).map(s => s.trim()).filter(Boolean);
+      const icon = /ca\s*1/i.test(title) ? "☀️" : /ca\s*2/i.test(title) ? "🌤️" : "🎊";
+      const label = /ca\s*1/i.test(title) ? "Trực ca 1" : /ca\s*2/i.test(title) ? "Trực ca 2" : title;
+      const people = String(value || "").split(/[•,]/).map(s => s.trim()).filter(Boolean);
       body.push(formatDutyAlignedLine(icon, label, formatDutyInlinePeople(people, { bold: true })));
       continue;
     }
 
     if (!hasNoteTitle) {
-      body.push("", "ðŸ“ <b>GHI CHÃš</b>");
+      body.push("", "📝 <b>GHI CHÚ</b>");
       hasNoteTitle = true;
     }
-    body.push(line.startsWith("ðŸ“") ? escapeHtml(line) : formatDutyAlignedLine("ðŸ“", line, ""));
+    body.push(line.startsWith("📍") ? escapeHtml(line) : formatDutyAlignedLine("📍", line, ""));
   }
 
-  return body.concat(["", `ðŸ”— <a href="${escapeHtml(DUTY_SHEET_URL)}">Xem Google Sheet</a>`]).join("\n");
+  return body.concat(["", `🔗 <a href="${escapeHtml(DUTY_SHEET_URL)}">Xem Google Sheet</a>`]).join("\n");
 }
 
 function formatSundayDutyScheduleHtml(result) {
@@ -633,20 +633,20 @@ function formatSundayDutyScheduleHtml(result) {
 
   const shifts = Array.isArray(result.sundayShifts) ? result.sundayShifts : [];
   shifts.forEach((shift, shiftIndex) => {
-    if (shiftIndex > 0) lines.push("â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€");
+    if (shiftIndex > 0) lines.push("────────────────────");
     const isCa2 = /^.*ca\s*2/i.test(String(shift.label || ""));
-    const label = isCa2 ? "Trá»±c ca 2" : "Trá»±c ca 1";
-    const icon = isCa2 ? "ðŸŒ¤ï¸" : "â˜€ï¸";
+    const label = isCa2 ? "Trực ca 2" : "Trực ca 1";
+    const icon = isCa2 ? "🌤️" : "☀️";
     
     lines.push(formatDutyAlignedLine(icon, label, formatDutyInlinePeople(shift.people, { bold: true })));
-    lines.push(formatDutyAlignedLine("ðŸ“¡", "Trá»±c server", formatDutyInlinePeople(shift.server ? [shift.server] : [], { bold: true })));
+    lines.push(formatDutyAlignedLine("📡", "Trực server", formatDutyInlinePeople(shift.server ? [shift.server] : [], { bold: true })));
     if (shift.note) {
       const noteValue = String(shift.note || "").replace(/^Server\s*:\s*/i, "").trim() || "-";
-      lines.push(formatDutyAlignedLine("ðŸ“", "Ghi chÃº", `<i>${escapeHtml(noteValue)}</i>`));
+      lines.push(formatDutyAlignedLine("📝", "Ghi chú", `<i>${escapeHtml(noteValue)}</i>`));
     }
   });
 
-  return lines.join("\n") + `\n\nðŸ”— <a href="${escapeHtml(DUTY_SHEET_URL)}">Xem Google Sheet</a>`;
+  return lines.join("\n") + `\n\n🔗 <a href="${escapeHtml(DUTY_SHEET_URL)}">Xem Google Sheet</a>`;
 }
 
 function getAccountDisplayName(account = {}) {
@@ -674,7 +674,7 @@ function getAccountMention(account = {}) {
   const safeAccount = account || {};
   const username = String(safeAccount.telegramUsername || "").replace(/^@/, "").trim();
   if (username) return `@${username}`;
-  const name = escapeHtml(getAccountDisplayName(safeAccount) || safeAccount.telegramId || safeAccount.chatId || "NgÆ°á»i trá»±c");
+  const name = escapeHtml(getAccountDisplayName(safeAccount) || safeAccount.telegramId || safeAccount.chatId || "Người trực");
   const id = safeAccount.telegramId || safeAccount.chatId;
   return id ? `<a href="tg://user?id=${escapeHtml(id)}">${name}</a>` : name;
 }
@@ -686,7 +686,7 @@ function formatDutyMatchedMentions(result, accounts = []) {
     if (!displayName) continue;
     const roles = findUserDutyRoles(result, displayName);
     if (!roles.length) continue;
-    lines.push(`âœ… ${getAccountMention(account)} - ${roles.map((role) => `<b>${escapeHtml(role)}</b>`).join(" â€¢ ")}`);
+    lines.push(`✅ ${getAccountMention(account)} - ${roles.map((role) => `<b>${escapeHtml(role)}</b>`).join(" • ")}`);
   }
   return lines;
 }
@@ -696,23 +696,23 @@ function formatDutyScheduleHtml(result, viewerName = "", options = {}) {
   const userRoles = includePersonalSection ? findUserDutyRoles(result, viewerName) : [];
   const personalSection = userRoles.length
     ? [
-      "âœ… <b>Báº N CÃ“ Lá»ŠCH TRá»°C</b>",
-      `${viewerAccount ? getAccountMention(viewerAccount) + " - " : ""}${userRoles.map((role) => `<b>${escapeHtml(role)}</b>`).join(" â€¢ ")}`,
+      "✅ <b>BẠN CÓ LỊCH TRỰC</b>",
+      `${viewerAccount ? getAccountMention(viewerAccount) + " - " : ""}${userRoles.map((role) => `<b>${escapeHtml(role)}</b>`).join(" • ")}`,
       ""
     ]
     : [
-      "ðŸ“­ <b>Báº N KHÃ”NG CÃ“ Lá»ŠCH TRá»°C</b>",
-      "Báº¡n khÃ´ng cÃ³ lá»‹ch trá»±c trong ngÃ y nÃ y.",
+      "📭 <b>BẠN KHÔNG CÓ LỊCH TRỰC</b>",
+      "Bạn không có lịch trực trong ngày này.",
       ""
     ];
 
   if (!result?.found) {
     return [
-      "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
-      "ðŸ“‹ <b>Lá»‹ch trá»±c</b>",
-      "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "📋 <b>Lịch trực</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
       ...(includePersonalSection ? personalSection : []),
-      "ðŸ“­ KhÃ´ng cÃ³ dá»¯ liá»‡u lá»‹ch trá»±c cho ngÃ y nÃ y."
+      "📭 Không có dữ liệu lịch trực cho ngày này."
     ].join("\n");
   }
 
@@ -725,25 +725,25 @@ function formatDutyScheduleHtml(result, viewerName = "", options = {}) {
     const lines = [
       ...formatDutyHeader(result),
       "",
-      formatDutyAlignedLine("â˜€ï¸", "Trá»±c sÃ¡ng", formatDutyInlinePeople(result.morningPrimary ? [result.morningPrimary] : [], { bold: true })),
-      formatDutyAlignedLine("ðŸ›ï¸", "Trá»±c hÃ nh chÃ­nh", formatDutyInlinePeople(result.morningSupport, { bold: true })),
-      formatDutyAlignedLine("ðŸ±", "Trá»±c trÆ°a", formatDutyInlinePeople(result.noon, { bold: true })),
-      formatDutyAlignedLine("ðŸŒ¤ï¸", "Trá»±c tá»‘i", formatDutyInlinePeople(result.dutyNight, { bold: true })),
-      formatDutyAlignedLine("ðŸ“¡", "Trá»±c server", formatDutyInlinePeople(result.afterHoursServer ? [result.afterHoursServer] : [], { bold: true })),
+      formatDutyAlignedLine("☀️", "Trực sáng", formatDutyInlinePeople(result.morningPrimary ? [result.morningPrimary] : [], { bold: true })),
+      formatDutyAlignedLine("🏛️", "Trực hành chính", formatDutyInlinePeople(result.morningSupport, { bold: true })),
+      formatDutyAlignedLine("🍱", "Trực trưa", formatDutyInlinePeople(result.noon, { bold: true })),
+      formatDutyAlignedLine("🌤️", "Trực tối", formatDutyInlinePeople(result.dutyNight, { bold: true })),
+      formatDutyAlignedLine("📡", "Trực server", formatDutyInlinePeople(result.afterHoursServer ? [result.afterHoursServer] : [], { bold: true })),
     ];
 
     const noteLines = formatDutyNoteLines(result.note);
     if (noteLines.length) {
-      lines.push("", "ðŸ“ <b>GHI CHÃš</b>");
+      lines.push("", "📝 <b>GHI CHÚ</b>");
       lines.push(...noteLines);
     }
 
-    lines.push("", `ðŸ”— <a href="${escapeHtml(DUTY_SHEET_URL)}">Xem Google Sheet</a>`);
+    lines.push("", `🔗 <a href="${escapeHtml(DUTY_SHEET_URL)}">Xem Google Sheet</a>`);
     content = lines.join("\n");
   }
 
-  // ChÃ¨n pháº§n cÃ¡ nhÃ¢n vÃ o cuá»‘i
-  const footerDivider = "â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€";
+  // Chèn phần cá nhân vào cuối
+  const footerDivider = "────────────────────";
   return [
     content,
     ...(includePersonalSection ? [footerDivider, ...personalSection] : [])
@@ -780,11 +780,11 @@ function formatWeekScheduleResult(results, checkedAt = new Date()) {
   const checkedTime = new Intl.DateTimeFormat("vi-VN", { timeStyle: "medium", timeZone: config.timezoneId }).format(checkedAt);
 
   const lines = [
-    `ðŸ—“ï¸ <b>Lá»‹ch lÃ m viá»‡c cáº£ tuáº§n</b>`,
+    `🗓️ <b>Lịch làm việc cả tuần</b>`,
     "________________________________",
     "",
-    `â±ï¸ Giá» check: ${checkedTime}`,
-    `ðŸ—“ï¸ NgÃ y check: ${checkedDate}`,
+    `⏱️ Giờ check: ${checkedTime}`,
+    `🗓️ Ngày check: ${checkedDate}`,
     ""
   ];
 
@@ -797,20 +797,20 @@ function formatWeekScheduleResult(results, checkedAt = new Date()) {
       year: "numeric",
       timeZone: config.timezoneId
     }).format(target);
-    lines.push(`ðŸ—“ï¸ <b>${label}</b>`);
+    lines.push(`🗓️ <b>${label}</b>`);
     
     if (!result.entries?.length) {
-      lines.push("  - ChÆ°a cÃ³ lá»‹ch lÃ m viá»‡c");
+      lines.push("  - Chưa có lịch làm việc");
       lines.push("");
       continue;
     }
 
     const sorted = sortWorkScheduleEntries(result.entries);
     const groups = {
-      fullDay: { label: "Cáº¢ NGÃ€Y", icon: "ðŸ—“ï¸", items: sorted.filter((e) => /cáº£ ngÃ y|all day/i.test(getScheduleShiftLabel(e))) },
-      morning: { label: "CA SÃNG", icon: "â˜€ï¸", items: sorted.filter((e) => /sÃ¡ng/i.test(getScheduleShiftLabel(e))) },
-      afternoon: { label: "CA CHIá»€U", icon: "ðŸŒ¤ï¸", items: sorted.filter((e) => /chiá»u/i.test(getScheduleShiftLabel(e))) },
-      other: { label: "KHÃC", icon: "ðŸ’¡", items: sorted.filter((e) => !/cáº£ ngÃ y|all day|sÃ¡ng|chiá»u/i.test(getScheduleShiftLabel(e))) }
+      fullDay: { label: "CẢ NGÀY", icon: "🗓️", items: sorted.filter((e) => /cả ngày|all day/i.test(getScheduleShiftLabel(e))) },
+      morning: { label: "CA SÁNG", icon: "☀️", items: sorted.filter((e) => /sáng/i.test(getScheduleShiftLabel(e))) },
+      afternoon: { label: "CA CHIỀU", icon: "🌤️", items: sorted.filter((e) => /chiều/i.test(getScheduleShiftLabel(e))) },
+      other: { label: "KHÁC", icon: "💡", items: sorted.filter((e) => !/cả ngày|all day|sáng|chiều/i.test(getScheduleShiftLabel(e))) }
     };
 
 
@@ -833,40 +833,40 @@ function formatWeekScheduleResult(results, checkedAt = new Date()) {
 
 const START_QUOTES = [
   [
-    "HÃ´m nay mÃ¢y kÃ©o lÆ°ng trá»i,",
-    "lá»‹ch cá»§a Sáº¿p Ä‘á»ƒ em ngá»“i canh cho."
+    "Hôm nay mây kéo lưng trời,",
+    "lịch của Sếp để em ngồi canh cho."
   ],
   [
-    "NgÃ y dÃ i viá»‡c cÃ³ thá»ƒ Ä‘Ã´ng,",
-    "nhÆ°ng Ä‘Ãºng ngÃ y Ä‘Ãºng lá»‹ch thÃ¬ em khÃ´ng Ä‘á»ƒ sai."
+    "Ngày dài việc có thể đông,",
+    "nhưng đúng ngày đúng lịch thì em không để sai."
   ],
   [
-    "SÃ¡ng ra má»Ÿ lá»‹ch thong dong,",
-    "phiáº¿u nÃ o Ä‘Ãºng viá»‡c em lÃ´i ra liá»n."
+    "Sáng ra mở lịch thong dong,",
+    "phiếu nào đúng việc em lôi ra liền."
   ],
   [
-    "Viá»‡c nhiá»u chÆ°a cháº¯c Ä‘Ã£ cÄƒng,",
-    "cÃ³ em giá»¯ lá»‹ch, Ä‘á»¡ nháº±n hÆ¡n kha khÃ¡."
+    "Việc nhiều chưa chắc đã căng,",
+    "có em giữ lịch, đỡ nhằn hơn kha khá."
   ],
   [
-    "Lá»‹ch kia náº¿u cÃ³ Ä‘á»•i dá»i,",
-    "em soi Ä‘Ãºng chá»— chá»© khÃ´ng lÃ´i lá»‹ch ma."
+    "Lịch kia nếu có đổi dời,",
+    "em soi đúng chỗ chứ không lôi lịch ma."
   ],
   [
-    "Má»™t láº§n báº¥m, má»™t láº§n xem,",
-    "Ä‘Ãºng ngÃ y Ä‘Ãºng phiáº¿u em Ä‘em ra liá»n."
+    "Một lần bấm, một lần xem,",
+    "đúng ngày đúng phiếu em đem ra liền."
   ],
   [
-    "GiÃ³ ngoÃ i kia thÃ­ch lang thang,",
-    "cÃ²n em thÃ¬ thÃ­ch giá»¯ hÃ ng lá»‹ch cho Sáº¿p."
+    "Gió ngoài kia thích lang thang,",
+    "còn em thì thích giữ hàng lịch cho Sếp."
   ],
   [
-    "Viá»‡c cháº¡y ngÆ°á»£c, lá»‹ch Ä‘á»«ng loáº¡n,",
-    "Ä‘á»ƒ em gom láº¡i cho gá»n tá»«ng ngÃ y."
+    "Việc chạy ngược, lịch đừng loạn,",
+    "để em gom lại cho gọn từng ngày."
   ],
   [
-    "Báº¥m vÃ o má»™t nhá»‹p lÃ  xem,",
-    "lá»‹ch Ä‘Ã¢u phiáº¿u Ä‘Ã³ em Ä‘em tá»›i liá»n."
+    "Bấm vào một nhịp là xem,",
+    "lịch đâu phiếu đó em đem tới liền."
   ]
 ];
 
@@ -877,33 +877,33 @@ function pickStartQuote() {
 
 function homeText(telegramId) {
   return [
-    "ðŸ  <b>TRANG CHá»¦ HERMES BOT</b>",
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
-    "Em há»— trá»£ anh theo dÃµi cÃ´ng viá»‡c Hermes háº±ng ngÃ y: tá»•ng há»£p hÃ´m nay, lá»‹ch lÃ m viá»‡c, lá»‹ch trá»±c vÃ  KPI.",
+    "🏠 <b>TRANG CHỦ HERMES BOT</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "Em hỗ trợ anh theo dõi công việc Hermes hằng ngày: tổng hợp hôm nay, lịch làm việc, lịch trực và KPI.",
     "",
-    "ðŸ“Œ <b>CÃC Má»¤C CHÃNH</b>",
-    "â€¢ <b>Tá»•ng há»£p</b>: xem nhanh lá»‹ch trá»±c, lá»‹ch Hermes vÃ  KPI hÃ´m nay.",
-    "â€¢ <b>Lá»‹ch lÃ m viá»‡c</b>: xem lá»‹ch ngÃ y, tuáº§n, má»Ÿ nhanh phiáº¿u Hermes báº±ng mÃ£ <code>#phiáº¿u</code>.",
-    "â€¢ <b>Lá»‹ch trá»±c</b>: xem trá»±c ngÃ y/tuáº§n vÃ  nháº­n nháº¯c lá»‹ch trá»±c tá»± Ä‘á»™ng.",
-    "â€¢ <b>KPI</b>: xem KPI tá»«ng thÃ¡ng nÄƒm 2026, point, doanh thu phÃ²ng vÃ  táº¡m tÃ­nh phÃ¢n bá»• cÃ¡ nhÃ¢n.",
-    "â€¢ <b>ThÃ´ng bÃ¡o Hermes</b>: tá»± bÃ¡o khi cÃ³ thÃ´ng bÃ¡o má»›i hoáº·c phiáº¿u yÃªu cáº§u Ä‘á»•i tráº¡ng thÃ¡i, khÃ´ng bÃ¡o trÃ¹ng.",
+    "📌 <b>CÁC MỤC CHÍNH</b>",
+    "• <b>Tổng hợp</b>: xem nhanh lịch trực, lịch Hermes và KPI hôm nay.",
+    "• <b>Lịch làm việc</b>: xem lịch ngày, tuần, mở nhanh phiếu Hermes bằng mã <code>#phiếu</code>.",
+    "• <b>Lịch trực</b>: xem trực ngày/tuần và nhận nhắc lịch trực tự động.",
+    "• <b>KPI</b>: xem KPI từng tháng năm 2026, point, doanh thu phòng và tạm tính phân bổ cá nhân.",
+    "• <b>Thông báo Hermes</b>: tự báo khi có thông báo mới hoặc phiếu yêu cầu đổi trạng thái, không báo trùng.",
     "",
-    "âŒ¨ï¸ <b>Lá»†NH NHANH</b>",
-    "â€¢ <code>/today</code> - Xem tá»•ng há»£p hÃ´m nay",
-    "â€¢ <code>/lich</code> - Xem lá»‹ch lÃ m viá»‡c hÃ´m nay",
-    "â€¢ <code>/lich mai</code> - Xem lá»‹ch lÃ m viá»‡c ngÃ y mai",
-    "â€¢ <code>/lich 28/04/2026</code> - Xem lá»‹ch lÃ m viá»‡c theo ngÃ y",
-    "â€¢ <code>/truc</code> - Xem lá»‹ch trá»±c hÃ´m nay",
-    "â€¢ <code>/truc mai</code> - Xem lá»‹ch trá»±c ngÃ y mai",
-    "â€¢ <code>/kpi</code> - Má»Ÿ menu KPI theo thÃ¡ng",
-    "â€¢ <code>/sethermes</code> - LÆ°u hoáº·c Ä‘á»•i tÃ i khoáº£n Hermes",
-    "â€¢ <code>/deletehermes</code> - XÃ³a tÃ i khoáº£n Hermes Ä‘Ã£ lÆ°u",
-    "â€¢ <code>/clearhermes</code> - XÃ³a session Hermes, giá»¯ tÃ i khoáº£n Ä‘á»ƒ test OTP",
-    "â€¢ <code>/id</code> - Xem Telegram ID",
-    "â€¢ <code>/cancel</code> - Há»§y thao tÃ¡c Ä‘ang chá»",
-    "â€¢ <code>/testnotify</code> - Test Ä‘á»c thÃ´ng bÃ¡o Hermes má»›i nháº¥t",
+    "⌨️ <b>LỆNH NHANH</b>",
+    "• <code>/today</code> - Xem tổng hợp hôm nay",
+    "• <code>/lich</code> - Xem lịch làm việc hôm nay",
+    "• <code>/lich mai</code> - Xem lịch làm việc ngày mai",
+    "• <code>/lich 28/04/2026</code> - Xem lịch làm việc theo ngày",
+    "• <code>/truc</code> - Xem lịch trực hôm nay",
+    "• <code>/truc mai</code> - Xem lịch trực ngày mai",
+    "• <code>/kpi</code> - Mở menu KPI theo tháng",
+    "• <code>/sethermes</code> - Lưu hoặc đổi tài khoản Hermes",
+    "• <code>/deletehermes</code> - Xóa tài khoản Hermes đã lưu",
+    "• <code>/clearhermes</code> - Xóa session Hermes, giữ tài khoản để test OTP",
+    "• <code>/id</code> - Xem Telegram ID",
+    "• <code>/cancel</code> - Hủy thao tác đang chờ",
+    "• <code>/testnotify</code> - Test đọc thông báo Hermes mới nhất",
     "",
-    `ðŸ‘¤ Telegram ID: <code>${telegramId}</code>`
+    `👤 Telegram ID: <code>${telegramId}</code>`
   ].join("\n");
 }
 
@@ -913,88 +913,88 @@ function helpText(telegramId) {
 
 function workMenuText() {
   return [
-    "ðŸ—“ï¸ <b>Lá»‹ch lÃ m viá»‡c</b>",
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
-    "DÃ¹ng má»¥c nÃ y Ä‘á»ƒ xem lá»‹ch há»— trá»£/triá»ƒn khai theo ngÃ y hoáº·c cáº£ tuáº§n.",
+    "🗓️ <b>Lịch làm việc</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "Dùng mục này để xem lịch hỗ trợ/triển khai theo ngày hoặc cả tuần.",
     "",
-    "âœ… <b>BOT Sáº¼ HIá»‚N THá»Š</b>",
-    "â€¢ Lá»‹ch Ä‘Æ°á»£c nhÃ³m theo <b>Cáº¢ NGÃ€Y / CA SÃNG / CA CHIá»€U</b>.",
-    "â€¢ MÃ£ <code>#phiáº¿u</code> cÃ³ thá»ƒ báº¥m Ä‘á»ƒ má»Ÿ nhanh phiáº¿u Hermes.",
-    "â€¢ NÃºt <b>Xem lá»‹ch 1, 2, 3...</b> Ä‘á»ƒ xem ghi chÃº/chi tiáº¿t tá»«ng lá»‹ch.",
+    "✅ <b>BOT SẼ HIỂN THỊ</b>",
+    "• Lịch được nhóm theo <b>CẢ NGÀY / CA SÁNG / CA CHIỀU</b>.",
+    "• Mã <code>#phiếu</code> có thể bấm để mở nhanh phiếu Hermes.",
+    "• Nút <b>Xem lịch 1, 2, 3...</b> để xem ghi chú/chi tiết từng lịch.",
     "",
-    "âŒ¨ï¸ <b>Lá»†NH Cáº¦N NHá»š</b>",
-    "â€¢ <code>/lich</code> - Lá»‹ch hÃ´m nay",
-    "â€¢ <code>/lich hÃ´m nay</code> - Lá»‹ch hÃ´m nay",
-    "â€¢ <code>/lich mai</code> - Lá»‹ch ngÃ y mai",
-    "â€¢ <code>/lich 28/04</code> - Lá»‹ch ngÃ y 28/04 trong nÄƒm hiá»‡n táº¡i",
-    "â€¢ <code>/lich 28/04/2026</code> - Lá»‹ch Ä‘Ãºng ngÃ y 28/04/2026",
+    "⌨️ <b>LỆNH CẦN NHỚ</b>",
+    "• <code>/lich</code> - Lịch hôm nay",
+    "• <code>/lich hôm nay</code> - Lịch hôm nay",
+    "• <code>/lich mai</code> - Lịch ngày mai",
+    "• <code>/lich 28/04</code> - Lịch ngày 28/04 trong năm hiện tại",
+    "• <code>/lich 28/04/2026</code> - Lịch đúng ngày 28/04/2026",
     "",
-    "ðŸ‘‡ Anh chá»n nÃºt bÃªn dÆ°á»›i Ä‘á»ƒ xem nhanh."
+    "👇 Anh chọn nút bên dưới để xem nhanh."
   ].join("\n");
 }
 
 function dutyMenuText() {
   return [
-    "ðŸ“‹ <b>Lá»‹ch trá»±c</b>",
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
-    "DÃ¹ng má»¥c nÃ y Ä‘á»ƒ xem lá»‹ch trá»±c cÃ¡ nhÃ¢n vÃ  toÃ n Ä‘á»™i theo Google Sheet.",
+    "📋 <b>Lịch trực</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "Dùng mục này để xem lịch trực cá nhân và toàn đội theo Google Sheet.",
     "",
-    "âœ… <b>BOT Sáº¼ HIá»‚N THá»Š</b>",
-    "â€¢ Báº¡n cÃ³ lá»‹ch trá»±c hay khÃ´ng trong ngÃ y Ä‘Æ°á»£c chá»n.",
-    "â€¢ NgÆ°á»i cÃ³ lá»‹ch trá»±c theo username Telegram Ä‘á»ƒ trÃ¡nh miss thÃ´ng bÃ¡o.",
-    "â€¢ Lá»‹ch trá»±c ngÃ y hoáº·c lá»‹ch trá»±c cáº£ tuáº§n.",
+    "✅ <b>BOT SẼ HIỂN THỊ</b>",
+    "• Bạn có lịch trực hay không trong ngày được chọn.",
+    "• Người có lịch trực theo username Telegram để tránh miss thông báo.",
+    "• Lịch trực ngày hoặc lịch trực cả tuần.",
     "",
-    "ðŸ”” <b>THÃ”NG BÃO Tá»° Äá»˜NG</b>",
-    "â€¢ <b>08:00</b>: tá»± gá»­i tab Tá»•ng há»£p hÃ´m nay",
-    "â€¢ <b>Má»—i 30 giÃ¢y</b>: kiá»ƒm tra thÃ´ng bÃ¡o Hermes má»›i vÃ  chá»‰ bÃ¡o 1 láº§n",
-    "â€¢ <b>07:00</b>: nháº¯c lá»‹ch trá»±c hÃ´m nay",
-    "â€¢ <b>11:00</b>: nháº¯c lá»‹ch trá»±c hÃ´m nay",
-    "â€¢ <b>17:00</b>: nháº¯c lá»‹ch trá»±c ngÃ y mai",
+    "🔔 <b>THÔNG BÁO TỰ ĐỘNG</b>",
+    "• <b>08:00</b>: tự gửi tab Tổng hợp hôm nay",
+    "• <b>Mỗi 30 giây</b>: kiểm tra thông báo Hermes mới và chỉ báo 1 lần",
+    "• <b>07:00</b>: nhắc lịch trực hôm nay",
+    "• <b>11:00</b>: nhắc lịch trực hôm nay",
+    "• <b>17:00</b>: nhắc lịch trực ngày mai",
     "",
-    "âŒ¨ï¸ <b>Lá»†NH Cáº¦N NHá»š</b>",
-    "â€¢ <code>/truc</code> - Lá»‹ch trá»±c hÃ´m nay",
-    "â€¢ <code>/truc hÃ´m nay</code> - Lá»‹ch trá»±c hÃ´m nay",
-    "â€¢ <code>/truc mai</code> - Lá»‹ch trá»±c ngÃ y mai",
-    "â€¢ <code>/truc 29/04</code> - Lá»‹ch trá»±c ngÃ y 29/04",
-    "â€¢ <code>/truc 29/04/2026</code> - Lá»‹ch trá»±c Ä‘Ãºng ngÃ y",
-    "â€¢ <code>/testtruc</code> - Test thÃ´ng bÃ¡o lá»‹ch trá»±c hÃ´m nay",
-    "â€¢ <code>/testtruc mai</code> - Test thÃ´ng bÃ¡o lá»‹ch trá»±c ngÃ y mai",
+    "⌨️ <b>LỆNH CẦN NHỚ</b>",
+    "• <code>/truc</code> - Lịch trực hôm nay",
+    "• <code>/truc hôm nay</code> - Lịch trực hôm nay",
+    "• <code>/truc mai</code> - Lịch trực ngày mai",
+    "• <code>/truc 29/04</code> - Lịch trực ngày 29/04",
+    "• <code>/truc 29/04/2026</code> - Lịch trực đúng ngày",
+    "• <code>/testtruc</code> - Test thông báo lịch trực hôm nay",
+    "• <code>/testtruc mai</code> - Test thông báo lịch trực ngày mai",
     "",
-    "ðŸ‘‡ Anh chá»n nÃºt bÃªn dÆ°á»›i Ä‘á»ƒ xem nhanh."
+    "👇 Anh chọn nút bên dưới để xem nhanh."
   ].join("\n");
 }
 
 function kpiMenuText(months = []) {
-  const monthText = months.length ? months.map((month) => { const [year, monthNumber] = String(month).split("_"); return `${monthNumber}/${year}`; }).join(", ") : "chÆ°a cÃ³ thÃ¡ng nÃ o";
+  const monthText = months.length ? months.map((month) => { const [year, monthNumber] = String(month).split("_"); return `${monthNumber}/${year}`; }).join(", ") : "chưa có tháng nào";
   return [
-    "ðŸŽ¯ <b>KPI HERMES 2026</b>",
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
-    "DÃ¹ng má»¥c nÃ y Ä‘á»ƒ xem KPI theo tá»«ng thÃ¡ng, Ä‘Ãºng sheet thÃ¡ng Ä‘ang chá»n.",
+    "🎯 <b>KPI HERMES 2026</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "Dùng mục này để xem KPI theo từng tháng, đúng sheet tháng đang chọn.",
     "",
-    "âœ… <b>BOT Sáº¼ HIá»‚N THá»Š</b>",
-    "â€¢ KPI Hotline, KPI Deploy vÃ  KPI SUM.",
-    "â€¢ Point thá»±c táº¿, point bonus, point tÃ­nh lÆ°Æ¡ng.",
-    "â€¢ Sáº£n lÆ°á»£ng triá»ƒn khai vÃ  chá»‰ sá»‘ váº­n hÃ nh.",
-    "â€¢ Doanh thu phÃ²ng theo Ä‘Ãºng thÃ¡ng Ä‘ang xem.",
-    "â€¢ Doanh thu phÃ¢n bá»• cÃ¡ nhÃ¢n vÃ  há»‡ sá»‘ phÃ¢n bá»• nhÃ³m <i>(táº¡m tÃ­nh)</i>.",
+    "✅ <b>BOT SẼ HIỂN THỊ</b>",
+    "• KPI Hotline, KPI Deploy và KPI SUM.",
+    "• Point thực tế, point bonus, point tính lương.",
+    "• Sản lượng triển khai và chỉ số vận hành.",
+    "• Doanh thu phòng theo đúng tháng đang xem.",
+    "• Doanh thu phân bổ cá nhân và hệ số phân bổ nhóm <i>(tạm tính)</i>.",
     "",
-    "ðŸ§¾ <b>SHEET KPI</b>",
-    "â€¢ Bot tá»± dÃ² cÃ¡c sheet dáº¡ng <code>2026_01</code> Ä‘áº¿n <code>2026_12</code>.",
-    "â€¢ Khi phÃ¡t sinh sheet thÃ¡ng má»›i, báº¥m láº¡i <code>/kpi</code> Ä‘á»ƒ menu tá»± cáº­p nháº­t.",
-    `â€¢ ThÃ¡ng Ä‘ang cÃ³ dá»¯ liá»‡u: <code>${monthText}</code>`,
+    "🧾 <b>SHEET KPI</b>",
+    "• Bot tự dò các sheet dạng <code>2026_01</code> đến <code>2026_12</code>.",
+    "• Khi phát sinh sheet tháng mới, bấm lại <code>/kpi</code> để menu tự cập nhật.",
+    `• Tháng đang có dữ liệu: <code>${monthText}</code>`,
     "",
-    "âŒ¨ï¸ <b>Lá»†NH Cáº¦N NHá»š</b>",
-    "â€¢ <code>/kpi</code> - Má»Ÿ menu KPI theo thÃ¡ng",
-    "â€¢ Chá»n nÃºt thÃ¡ng, vÃ­ dá»¥ <b>05/2026</b>, Ä‘á»ƒ xem KPI thÃ¡ng Ä‘Ã³",
+    "⌨️ <b>LỆNH CẦN NHỚ</b>",
+    "• <code>/kpi</code> - Mở menu KPI theo tháng",
+    "• Chọn nút tháng, ví dụ <b>05/2026</b>, để xem KPI tháng đó",
     "",
-    "ðŸ‘‡ Anh chá»n thÃ¡ng bÃªn dÆ°á»›i Ä‘á»ƒ xem chi tiáº¿t."
+    "👇 Anh chọn tháng bên dưới để xem chi tiết."
   ].join("\n");
 }
 
 function buildStatusText() {
   return [
-    "Bot lá»‹ch Hermes: online",
-    `Báº¯t Ä‘áº§u: ${formatDateTime(startedAt)}`,
+    "Bot lịch Hermes: online",
+    `Bắt đầu: ${formatDateTime(startedAt)}`,
     `Uptime: ${formatDuration(Date.now() - startedAt.getTime())}`,
     `Thu muc chay: ${process.cwd()}`
   ].join("\n");
@@ -1016,14 +1016,14 @@ async function notifyDutyScheduleForDate(date, reasonLabel) {
   const accounts = await getAllHermesAccounts({ secret: config.botSecretKey });
   const mentionLines = formatDutyMatchedMentions(result, accounts);
   const mentionSection = mentionLines.length
-    ? ["âœ… <b>Báº N CÃ“ Lá»ŠCH TRá»°C</b>", ...mentionLines, "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”"]
+    ? ["✅ <b>BẠN CÓ LỊCH TRỰC</b>", ...mentionLines, "━━━━━━━━━━━━━━━━━━━━"]
     : [];
   const dateLabel = new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date);
   const text = [
-    "ðŸ”” <b>NHáº®C Lá»ŠCH TRá»°C</b>",
-    `â° <b>Má»‘c nháº¯c:</b> ${escapeHtml(reasonLabel)}`,
-    `ðŸ“… <b>NgÃ y trá»±c:</b> <code>${escapeHtml(dateLabel)}</code>`,
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+    "🔔 <b>NHẮC LỊCH TRỰC</b>",
+    `⏰ <b>Mốc nhắc:</b> ${escapeHtml(reasonLabel)}`,
+    `📅 <b>Ngày trực:</b> <code>${escapeHtml(dateLabel)}</code>`,
+    "━━━━━━━━━━━━━━━━━━━━",
     ...mentionSection,
     formatDutyScheduleHtml(result, "")
   ].join("\n");
@@ -1053,13 +1053,13 @@ function getDutyReminderMoment(now = new Date()) {
     return {
       key: `${parts.year}-${parts.month}-${parts.day}-17-tomorrow`,
       date: getRelativeWorkScheduleDate(1, localDate),
-      label: "17:00 - lá»‹ch trá»±c ngÃ y mai"
+      label: "17:00 - lịch trực ngày mai"
     };
   }
   return {
     key: `${parts.year}-${parts.month}-${parts.day}-${hour}-today`,
     date: localDate,
-    label: `${String(hour).padStart(2, "0")}:00 - lá»‹ch trá»±c hÃ´m nay`
+    label: `${String(hour).padStart(2, "0")}:00 - lịch trực hôm nay`
   };
 }
 
@@ -1106,13 +1106,13 @@ async function releaseInstanceLock() {
 
 async function guard(ctx, next) {
   if (!isPrivateChat(ctx)) {
-    if (ctx.callbackQuery) await ctx.answerCbQuery("Bot chá»‰ hoáº¡t Ä‘á»™ng trong chat private.");
-    if (ctx.reply) await ctx.reply("Bot chá»‰ hoáº¡t Ä‘á»™ng trong chat private. Má»Ÿ chat riÃªng vá»›i bot nhÃ© Sáº¿p.");
+    if (ctx.callbackQuery) await ctx.answerCbQuery("Bot chỉ hoạt động trong chat private.");
+    if (ctx.reply) await ctx.reply("Bot chỉ hoạt động trong chat private. Mở chat riêng với bot nhé Sếp.");
     return;
   }
   if (isStartLikeUpdate(ctx)) return next();
   if (!(await isAllowedUser(ctx))) {
-    if (ctx.callbackQuery) await ctx.answerCbQuery("Telegram ID nÃ y chÆ°a Ä‘Æ°á»£c cáº¥p quyá»n.");
+    if (ctx.callbackQuery) await ctx.answerCbQuery("Telegram ID này chưa được cấp quyền.");
     if (ctx.reply) await ctx.reply(buildUnauthorizedText(ctx), Markup.removeKeyboard());
     return;
   }
@@ -1131,7 +1131,7 @@ function getWorkScheduleCacheKey(chatId, targetDate) {
 
 function rememberWorkSchedule(ctx, result) {
   const key = getWorkScheduleCacheKey(ctx.chat.id, result.targetDate);
-  // Sáº¯p xáº¿p láº¡i danh sÃ¡ch lá»‹ch trÆ°á»›c khi lÆ°u vÃ o cache Ä‘á»ƒ nÃºt báº¥m khá»›p vá»›i danh sÃ¡ch hiá»ƒn thá»‹
+  // Sắp xếp lại danh sách lịch trước khi lưu vào cache để nút bấm khớp với danh sách hiển thị
   const sortedResult = {
     ...result,
     entries: sortWorkScheduleEntries(result.entries)
@@ -1146,15 +1146,15 @@ function rememberWorkSchedule(ctx, result) {
 async function askWorkScheduleOtherDate(ctx) {
   pendingActions.set(ctx.chat.id, { stage: "hermes_schedule_date" });
   await replyFresh(ctx, [
-    "ðŸ“† <b>Chá»n ngÃ y cáº§n xem lá»‹ch</b>",
+    "📆 <b>Chọn ngày cần xem lịch</b>",
     "",
-    "Sáº¿p chá»‰ cáº§n gá»­i má»™t trong cÃ¡c dáº¡ng sau:",
-    "â€¢ <code>28/04</code>",
-    "â€¢ <code>28/04/2026</code>",
-    "â€¢ <code>hÃ´m nay</code>",
-    "â€¢ <code>mai</code>",
+    "Sếp chỉ cần gửi một trong các dạng sau:",
+    "• <code>28/04</code>",
+    "• <code>28/04/2026</code>",
+    "• <code>hôm nay</code>",
+    "• <code>mai</code>",
     "",
-    "Muá»‘n huá»· thÃ¬ gÃµ <code>/cancel</code>."
+    "Muốn huỷ thì gõ <code>/cancel</code>."
   ].join("\n"), {
     parse_mode: "HTML"
   });
@@ -1163,15 +1163,15 @@ async function askWorkScheduleOtherDate(ctx) {
 async function askDutyOtherDate(ctx) {
   pendingActions.set(ctx.chat.id, { stage: "duty_schedule_date" });
   await replyFresh(ctx, [
-    "ðŸ“† <b>Chá»n ngÃ y cáº§n xem lá»‹ch trá»±c</b>",
+    "📆 <b>Chọn ngày cần xem lịch trực</b>",
     "",
-    "Sáº¿p chá»‰ cáº§n gá»­i má»™t trong cÃ¡c dáº¡ng sau:",
-    "â€¢ <code>29/04</code>",
-    "â€¢ <code>29/04/2026</code>",
-    "â€¢ <code>hÃ´m nay</code>",
-    "â€¢ <code>mai</code>",
+    "Sếp chỉ cần gửi một trong các dạng sau:",
+    "• <code>29/04</code>",
+    "• <code>29/04/2026</code>",
+    "• <code>hôm nay</code>",
+    "• <code>mai</code>",
     "",
-    "Muá»‘n huá»· thÃ¬ gÃµ <code>/cancel</code>."
+    "Muốn huỷ thì gõ <code>/cancel</code>."
   ].join("\n"), {
     parse_mode: "HTML"
   });
@@ -1180,7 +1180,7 @@ async function askDutyOtherDate(ctx) {
 async function getHermesAccountOrReply(ctx) {
   const account = await getHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id });
   if (!account?.hermesUsername || !account?.hermesPassword) {
-    await replyFresh(ctx, "ChÆ°a cÃ³ tÃ i khoáº£n Hermes. Gá»­i /sethermes Ä‘á»ƒ lÆ°u trÆ°á»›c nhÃ© Sáº¿p.", keyboard());
+    await replyFresh(ctx, "Chưa có tài khoản Hermes. Gửi /sethermes để lưu trước nhé Sếp.", keyboard());
     return null;
   }
   return account;
@@ -1190,7 +1190,7 @@ async function showWorkSchedule(ctx, date = new Date()) {
   const account = await getHermesAccountOrReply(ctx);
   if (!account) return;
 
-  const loadingMessageId = await sendTempMessage(ctx, "Äang kiá»ƒm tra lá»‹ch lÃ m viá»‡c Hermes...");
+  const loadingMessageId = await sendTempMessage(ctx, "Đang kiểm tra lịch làm việc Hermes...");
   try {
     const result = await enqueue(() => getWorkScheduleByDay({
       username: account.hermesUsername,
@@ -1202,11 +1202,11 @@ async function showWorkSchedule(ctx, date = new Date()) {
     if (result.sessionExpired) await clearHermesSession(ctx.chat.id);
     if (result.otpRequired) {
       pendingActions.set(ctx.chat.id, { stage: "hermes_schedule_otp", date });
-      await replyFresh(ctx, "Hermes yÃªu cáº§u OTP. Sáº¿p gá»­i mÃ£ OTP má»›i nháº¥t, em sáº½ xÃ¡c nháº­n rá»“i lÆ°u phiÃªn. /cancel Ä‘á»ƒ huá»·.");
+      await replyFresh(ctx, "Hermes yêu cầu OTP. Sếp gửi mã OTP mới nhất, em sẽ xác nhận rồi lưu phiên. /cancel để huỷ.");
       return;
     }
     if (!result.ok) {
-      await replyFresh(ctx, `KhÃ´ng láº¥y Ä‘Æ°á»£c lá»‹ch lÃ m viá»‡c.\n${String(result.message || "Lá»—i khÃ´ng xÃ¡c Ä‘á»‹nh").slice(0, 700)}`, keyboard());
+      await replyFresh(ctx, `Không lấy được lịch làm việc.\n${String(result.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
       return;
     }
     if (result.storageState) {
@@ -1230,14 +1230,14 @@ function kpiKeyboard(months = []) {
 
   const monthButtons = normalizedMonths.map((month) => {
     const [year, monthNumber] = String(month).split("_");
-    return Markup.button.callback(`ðŸ“Š ${monthNumber}/${year}`, `action:hermes_kpi_month:${month}`);
+    return Markup.button.callback(`📊 ${monthNumber}/${year}`, `action:hermes_kpi_month:${month}`);
   });
 
   for (let i = 0; i < monthButtons.length; i += 3) {
     rows.push(monthButtons.slice(i, i + 3));
   }
 
-  const homeButton = Markup.button.callback("ðŸ  Vá» trang chá»§", "action:menu");
+  const homeButton = Markup.button.callback("🏠 Về trang chủ", "action:menu");
   if (rows.length && rows[rows.length - 1].length < 3) {
     rows[rows.length - 1].push(homeButton);
   } else {
@@ -1256,17 +1256,17 @@ function formatKpiBar(label, ratio) {
   const totalSteps = 10;
   const activeSteps = Math.round((Math.min(percent, 100) / 100) * totalSteps);
   
-  const filled = "â–°".repeat(activeSteps);
-  const empty = "â–±".repeat(totalSteps - activeSteps);
+  const filled = "▰".repeat(activeSteps);
+  const empty = "▱".repeat(totalSteps - activeSteps);
   const bar = `${filled}${empty}`;
   
-  let icon = "ðŸŸ¢";
+  let icon = "🟢";
   if (percent < 80) {
-    icon = "ðŸ”´";
+    icon = "🔴";
   } else if (percent < 100) {
-    icon = "ðŸŸ¡";
+    icon = "🟡";
   } else if (percent >= 110) {
-    icon = "ðŸ’Ž"; // Bonus icon for high performance
+    icon = "💎"; // Bonus icon for high performance
   }
 
   const dummyLink = "https://t.me/hermes_kpi";
@@ -1289,7 +1289,7 @@ function parseMoneyValue(value) {
 }
 
 function formatMoneyValue(value) {
-  return Math.round(Number(value || 0)).toLocaleString("en-US") + " Ä‘";
+  return Math.round(Number(value || 0)).toLocaleString("en-US") + " đ";
 }
 
 function padRight(value, width) {
@@ -1304,40 +1304,40 @@ function padLeft(value, width) {
 
 function formatWorkloadTable(item) {
   const allRows = [
-    ["POS (6)", item.deployPos, "ðŸ–¥"],
-    ["FABi (6)", item.deployFabi, "ðŸ¥ª"],
-    ["CRM (3)", item.deployCrm, "ðŸ‘¥"],
-    ["BK (3)", item.deployBk, "ðŸ“’"],
-    ["Call (3)", item.deployCall, "ðŸ“ž"],
-    ["WO (3)", item.deployWo, "ðŸ› "],
-    ["O2O (3)", item.deployO2o, "ðŸŒ"],
-    ["Hub (1)", item.deployHub, "ðŸ”Œ"],
-    ["HDDT (1.5)", item.deployHddt, "ðŸ§¾"],
-    ["FoodHub (1.5)", item.deployFoodHub, "ðŸ±"],
-    ["Triá»ƒn khai thÃªm (3)", item.deployExtra, "âž•"],
-    ["Onsite TX (1.5)", item.onsiteTx, "ðŸ "],
-    ["Onsite NT (3)", item.onsiteNt, "ðŸ“"],
-    ["Báº£o trÃ¬ (3)", item.maintenance, "ðŸ”§"]
+    ["POS (6)", item.deployPos, "🖥"],
+    ["FABi (6)", item.deployFabi, "🥪"],
+    ["CRM (3)", item.deployCrm, "👥"],
+    ["BK (3)", item.deployBk, "📒"],
+    ["Call (3)", item.deployCall, "📞"],
+    ["WO (3)", item.deployWo, "🛠"],
+    ["O2O (3)", item.deployO2o, "🌐"],
+    ["Hub (1)", item.deployHub, "🔌"],
+    ["HDDT (1.5)", item.deployHddt, "🧾"],
+    ["FoodHub (1.5)", item.deployFoodHub, "🍱"],
+    ["Triển khai thêm (3)", item.deployExtra, "➕"],
+    ["Onsite TX (1.5)", item.onsiteTx, "🏠"],
+    ["Onsite NT (3)", item.onsiteNt, "📍"],
+    ["Bảo trì (3)", item.maintenance, "🔧"]
   ];
 
   const activeRows = allRows.filter(([, val]) => Number(val || 0) > 0);
   const dummyLink = "https://t.me/hermes_kpi";
 
   if (activeRows.length === 0) {
-    return "âœ¨ <b>Sáº¢N LÆ¯á»¢NG:</b> <i>ChÆ°a cÃ³ dá»¯ liá»‡u má»›i.</i>";
+    return "✨ <b>SẢN LƯỢNG:</b> <i>Chưa có dữ liệu mới.</i>";
   }
 
   const lines = [
-    "âœ¨ <b>CHI TIáº¾T Sáº¢N LÆ¯á»¢NG</b>",
+    "✨ <b>CHI TIẾT SẢN LƯỢNG</b>",
     ...activeRows.map(([label, val, icon]) => `${icon} ${label}: <a href="${dummyLink}"><b>${formatMetricValue(val)}</b></a>`)
   ];
 
   if (Number(item.supportCount || 0) > 0 || Number(item.missFactor || 0) > 0 || Number(item.rateFactor || 0) > 0 || Number(item.rateAiAvg || 0) > 0) {
-    lines.push("", "âš™ï¸ <b>Váº¬N HÃ€NH</b>");
-    if (Number(item.supportCount || 0) > 0) lines.push(`â˜Žï¸ Support Count: <a href="${dummyLink}"><b>${formatMetricValue(item.supportCount, 0)}</b></a>`);
-    if (Number(item.missFactor || 0) > 0) lines.push(`ðŸ“‰ Há»‡ sá»‘ nhá»¡: <a href="${dummyLink}"><b>${formatMetricValue(item.missFactor, 2)}</b></a>`);
-    if (Number(item.rateFactor || 0) > 0) lines.push(`â­ Há»‡ sá»‘ Rate: <a href="${dummyLink}"><b>${formatMetricValue(item.rateFactor, 2)}</b></a>`);
-    if (Number(item.rateAiAvg || 0) > 0) lines.push(`ðŸ¤– Rate AI Avg: <a href="${dummyLink}"><b>${formatMetricValue(item.rateAiAvg, 4)}</b></a>`);
+    lines.push("", "⚙️ <b>VẬN HÀNH</b>");
+    if (Number(item.supportCount || 0) > 0) lines.push(`☎️ Support Count: <a href="${dummyLink}"><b>${formatMetricValue(item.supportCount, 0)}</b></a>`);
+    if (Number(item.missFactor || 0) > 0) lines.push(`📉 Hệ số nhỡ: <a href="${dummyLink}"><b>${formatMetricValue(item.missFactor, 2)}</b></a>`);
+    if (Number(item.rateFactor || 0) > 0) lines.push(`⭐ Hệ số Rate: <a href="${dummyLink}"><b>${formatMetricValue(item.rateFactor, 2)}</b></a>`);
+    if (Number(item.rateAiAvg || 0) > 0) lines.push(`🤖 Rate AI Avg: <a href="${dummyLink}"><b>${formatMetricValue(item.rateAiAvg, 4)}</b></a>`);
   }
 
   return lines.join("\n");
@@ -1354,43 +1354,43 @@ function formatKpiMonthTelegramHtml(monthData, item) {
   const roomRevenueValue = parseMoneyValue(item.roomRevenue);
   const personalRevenue = roomRevenueValue * allocationFactor * personalRatio;
   return [
-    "ðŸ’Ž <b>BÃO CÃO HIá»†U SUáº¤T - KPI</b>",
-    `ðŸ“… <b>Giai Ä‘oáº¡n:</b> <code>THÃNG ${monthLabel}</code>`,
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
-    `ðŸ‘¤ <b>Há»™i viÃªn:</b> <code>${escapeHtml(item.support)}</code>`,
+    "💎 <b>BÁO CÁO HIỆU SUẤT - KPI</b>",
+    `📅 <b>Giai đoạn:</b> <code>THÁNG ${monthLabel}</code>`,
+    "━━━━━━━━━━━━━━━━━━━━",
+    `👤 <b>Hội viên:</b> <code>${escapeHtml(item.support)}</code>`,
     "",
-    "ðŸ“Š <b>Báº¢NG Tá»”NG Há»¢P HIá»†U SUáº¤T</b>",
+    "📊 <b>BẢNG TỔNG HỢP HIỆU SUẤT</b>",
     formatKpiBar("HOTLINE", item.hotlinePct),
     "",
-    formatKpiBar("TRIá»‚N KHAI", item.deployPct),
+    formatKpiBar("TRIỂN KHAI", item.deployPct),
     "",
-    formatKpiBar("KPI Tá»”NG", item.kpiSum),
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+    formatKpiBar("KPI TỔNG", item.kpiSum),
+    "━━━━━━━━━━━━━━━━━━━━",
     "",
-    "ðŸ’° <b>THU NHáº¬P Æ¯á»šC TÃNH (POINTS)</b>",
-    `ðŸ’µ Point Thá»±c táº¿: <a href="${dummyLink}"><b>${formatMetricValue(item.pointActual)}</b></a>`,
-    `ðŸŽ Point ThÆ°á»Ÿng: <a href="${dummyLink}"><b>${formatMetricValue(item.pointBonus)}</b></a>`,
-    `â€¢ <b>Tá»”NG Cá»˜NG:</b> <a href="${dummyLink}"><b>${formatMetricValue(item.pointSalary)}</b></a>`,
+    "💰 <b>THU NHẬP ƯỚC TÍNH (POINTS)</b>",
+    `💵 Point Thực tế: <a href="${dummyLink}"><b>${formatMetricValue(item.pointActual)}</b></a>`,
+    `🎁 Point Thưởng: <a href="${dummyLink}"><b>${formatMetricValue(item.pointBonus)}</b></a>`,
+    `• <b>TỔNG CỘNG:</b> <a href="${dummyLink}"><b>${formatMetricValue(item.pointSalary)}</b></a>`,
     "",
-    `ðŸ‘¥ Tá»•ng point Ä‘á»™i: <a href="${dummyLink}"><b>${formatMetricValue(adjustedTeamTotalPoint)}</b></a>`,
-    `âž• Suáº¥t máº·c Ä‘á»‹nh khÃ¡c: <a href="${dummyLink}"><b>6.9%</b></a>`,
-    `ðŸ“ˆ Tá»· lá»‡ cÃ¡ nhÃ¢n: <a href="${dummyLink}"><b>${(personalRatio * 100).toFixed(1)}%</b></a>`,
-    `ðŸ’° Doanh thu phÃ²ng: <a href="${dummyLink}"><b>${escapeHtml(item.roomRevenue || "---")}</b></a>`,
-    `âš–ï¸ Há»‡ sá»‘ phÃ¢n bá»• nhÃ³m (táº¡m tÃ­nh): <a href="${dummyLink}"><b>50.6%</b></a>`,
-    `ðŸ’µ Doanh thu phÃ¢n bá»• cÃ¡ nhÃ¢n (táº¡m tÃ­nh): <a href="${dummyLink}"><b>${formatMoneyValue(personalRevenue)}</b></a>`,
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+    `👥 Tổng point đội: <a href="${dummyLink}"><b>${formatMetricValue(adjustedTeamTotalPoint)}</b></a>`,
+    `➕ Suất mặc định khác: <a href="${dummyLink}"><b>6.9%</b></a>`,
+    `📈 Tỷ lệ cá nhân: <a href="${dummyLink}"><b>${(personalRatio * 100).toFixed(1)}%</b></a>`,
+    `💰 Doanh thu phòng: <a href="${dummyLink}"><b>${escapeHtml(item.roomRevenue || "---")}</b></a>`,
+    `⚖️ Hệ số phân bổ nhóm (tạm tính): <a href="${dummyLink}"><b>50.6%</b></a>`,
+    `💵 Doanh thu phân bổ cá nhân (tạm tính): <a href="${dummyLink}"><b>${formatMoneyValue(personalRevenue)}</b></a>`,
+    "━━━━━━━━━━━━━━━━━━━━",
     formatWorkloadTable(item),
     "",
-    "<i>HÃ£y tiáº¿p tá»¥c duy trÃ¬ phong Ä‘á»™ xuáº¥t sáº¯c nhÃ©! ðŸš€âœ¨</i>"
+    "<i>Hãy tiếp tục duy trì phong độ xuất sắc nhé! 🚀✨</i>"
   ].join("\n");
 }
 
 async function showKpiSummary(ctx) {
-  const loadingMessageId = await sendTempMessage(ctx, "Äang kiá»ƒm tra thÃ´ng tin KPI...");
+  const loadingMessageId = await sendTempMessage(ctx, "Đang kiểm tra thông tin KPI...");
   try {
     const result = await enqueue(() => getKpiSummary());
     if (!result?.ok) {
-      await replyFresh(ctx, `KhÃ´ng táº£i Ä‘Æ°á»£c KPI.\n${String(result?.message || "Lá»—i khÃ´ng xÃ¡c Ä‘á»‹nh").slice(0, 700)}`, keyboard());
+      await replyFresh(ctx, `Không tải được KPI.\n${String(result?.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
       return;
     }
     await replyFresh(ctx, kpiMenuText(result.months || []), {
@@ -1404,18 +1404,18 @@ async function showKpiSummary(ctx) {
 }
 
 async function showKpiMonth(ctx, month) {
-  const loadingMessageId = await sendTempMessage(ctx, `Äang kiá»ƒm tra thÃ´ng tin KPI ${String(month || "").replace("_", "/")}...`);
+  const loadingMessageId = await sendTempMessage(ctx, `Đang kiểm tra thông tin KPI ${String(month || "").replace("_", "/")}...`);
   try {
     const account = await getHermesAccountOrReply(ctx);
     if (!account) return;
     const result = await enqueue(() => getKpiSummary(month));
     if (!result?.ok) {
-      await ctx.reply(`KhÃ´ng táº£i Ä‘Æ°á»£c KPI.\n${String(result?.message || "Lá»—i khÃ´ng xÃ¡c Ä‘á»‹nh").slice(0, 700)}`, keyboard());
+      await ctx.reply(`Không tải được KPI.\n${String(result?.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
       return;
     }
     const monthData = (result.monthly || []).find((item) => item.month === month);
     if (!monthData) {
-      await ctx.reply(`KhÃ´ng tÃ¬m tháº¥y sheet KPI thÃ¡ng ${month}.`, keyboard());
+      await ctx.reply(`Không tìm thấy sheet KPI tháng ${month}.`, keyboard());
       return;
     }
     const item = (monthData.records || []).find((row) => {
@@ -1424,7 +1424,7 @@ async function showKpiMonth(ctx, month) {
       return support === user || support === `${user}@ipos.vn` || user === `${support}@ipos.vn`;
     });
     if (!item) {
-      await ctx.reply(`KhÃ´ng tÃ¬m tháº¥y KPI cá»§a tÃ i khoáº£n ${account.hermesUsername} trong sheet ${month}.`, keyboard());
+      await ctx.reply(`Không tìm thấy KPI của tài khoản ${account.hermesUsername} trong sheet ${month}.`, keyboard());
       return;
     }
 
@@ -1469,7 +1469,7 @@ async function showDutySchedule(ctx, date = new Date()) {
       ...dutyKeyboard(date)
     });
   } catch (error) {
-    await replyFresh(ctx, `KhÃ´ng táº£i Ä‘Æ°á»£c lá»‹ch trá»±c Google Sheet.\n${String(error.message || error).slice(0, 700)}`, dutyKeyboard(date));
+    await replyFresh(ctx, `Không tải được lịch trực Google Sheet.\n${String(error.message || error).slice(0, 700)}`, dutyKeyboard(date));
   }
 }
 
@@ -1493,34 +1493,34 @@ async function showDutyScheduleWeek(ctx, date = new Date()) {
 }
 
 async function showTodayDashboard(ctx) {
-  const loadingMessageId = await sendTempMessage(ctx, "ðŸš€ <b>Äang chuáº©n bá»‹ Dashboard hÃ´m nay...</b>\n<i>Em Ä‘ang gom lá»‹ch trá»±c, lá»‹ch Hermes vÃ  KPI cho Sáº¿p. Äá»£i em má»™t xÃ­u nhÃ©!</i>", { parse_mode: "HTML" });
+  const loadingMessageId = await sendTempMessage(ctx, "🚀 <b>Đang chuẩn bị Dashboard hôm nay...</b>\n<i>Em đang gom lịch trực, lịch Hermes và KPI cho Sếp. Đợi em một xíu nhé!</i>", { parse_mode: "HTML" });
   
   const date = new Date();
   const account = await getHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id });
   const viewerName = account?.fullName || account?.username || `${ctx.from.first_name || ""} ${ctx.from.last_name || ""}`.trim();
 
   const sections = [
-    "ðŸš€ <b>DASHBOARD Tá»”NG Há»¢P HÃ”M NAY</b>",
-    `ðŸ“… NgÃ y: <code>${new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date)}</code>`,
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+    "🚀 <b>DASHBOARD TỔNG HỢP HÔM NAY</b>",
+    `📅 Ngày: <code>${new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date)}</code>`,
+    "━━━━━━━━━━━━━━━━━━━━",
     ""
   ];
 
   try {
     const duty = await fetchDutyScheduleByDate(date);
-    sections.push("ðŸ“‹ <b>Lá»‹ch trá»±c</b>");
-    // Láº¥y ná»™i dung lá»‹ch trá»±c nhÆ°ng bá» bá»›t header rÆ°á»m rÃ 
+    sections.push("📋 <b>Lịch trực</b>");
+    // Lấy nội dung lịch trực nhưng bỏ bớt header rườm rà
     const dutyText = formatDutyScheduleHtml(duty, viewerName);
-    const dutyBody = dutyText.split("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”").pop().trim();
-    sections.push(dutyBody || "ðŸ“­ KhÃ´ng cÃ³ dá»¯ liá»‡u lá»‹ch trá»±c.");
+    const dutyBody = dutyText.split("━━━━━━━━━━━━━━━━━━━━").pop().trim();
+    sections.push(dutyBody || "📭 Không có dữ liệu lịch trực.");
   } catch (error) {
-    sections.push("ðŸ“‹ <b>Lá»‹ch trá»±c</b>");
-    sections.push("âŒ Lá»—i táº£i lá»‹ch trá»±c Google Sheet.");
+    sections.push("📋 <b>Lịch trực</b>");
+    sections.push("❌ Lỗi tải lịch trực Google Sheet.");
   }
 
   if (account?.hermesUsername) {
-    sections.push("", "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-    sections.push("ðŸ—“ï¸ <b>Lá»‹ch lÃ m viá»‡c</b>");
+    sections.push("", "━━━━━━━━━━━━━━━━━━━━");
+    sections.push("🗓️ <b>Lịch làm việc</b>");
     
     const work = await enqueue(() => getWorkScheduleByDay({
       username: account.hermesUsername,
@@ -1534,12 +1534,12 @@ async function showTodayDashboard(ctx) {
     }
 
     if (work.ok) {
-      // Láº¥y ná»™i dung lá»‹ch lÃ m viá»‡c, bá» header rÆ°á»m rÃ 
+      // Lấy nội dung lịch làm việc, bỏ header rườm rà
       const workText = formatWorkScheduleResult(work);
       const workBody = workText.split("________________________________").pop().trim();
-      sections.push(workBody || "âœ¨ HÃ´m nay Sáº¿p thong dong, chÆ°a tháº¥y lá»‹ch há»— trá»£ nÃ o.");
+      sections.push(workBody || "✨ Hôm nay Sếp thong dong, chưa thấy lịch hỗ trợ nào.");
     } else {
-      sections.push(`âŒ KhÃ´ng láº¥y Ä‘Æ°á»£c lá»‹ch: ${work.message || "Lá»—i Hermes"}`);
+      sections.push(`❌ Không lấy được lịch: ${work.message || "Lỗi Hermes"}`);
     }
 
     const kpi = await enqueue(() => getKpiSummary());
@@ -1558,20 +1558,20 @@ async function showTodayDashboard(ctx) {
           storageState: account.hermesSession,
           month: nowMonth
         }));
-        row.roomRevenue = revenueResult.ok ? revenueResult.value : "Äang cáº­p nháº­t...";
+        row.roomRevenue = revenueResult.ok ? revenueResult.value : "Đang cập nhật...";
 
-        sections.push("", "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-        sections.push("ðŸŽ¯ <b>KPI Tá»”NG Há»¢P</b>");
+        sections.push("", "━━━━━━━━━━━━━━━━━━━━");
+        sections.push("🎯 <b>KPI TỔNG HỢP</b>");
         const kpiText = formatKpiMonthTelegramHtml(monthData, row);
-        const kpiParts = kpiText.split("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-        const kpiBody = kpiParts.slice(2, 4).join("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”").trim();
+        const kpiParts = kpiText.split("━━━━━━━━━━━━━━━━━━━━");
+        const kpiBody = kpiParts.slice(2, 4).join("━━━━━━━━━━━━━━━━━━━━").trim();
         sections.push(kpiBody || kpiText);
       }
       }
   }
 
-  sections.push("", "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-  sections.push("<i>ChÃºc Sáº¿p má»™t ngÃ y lÃ m viá»‡c rá»±c rá»¡! ðŸš€âœ¨</i>");
+  sections.push("", "━━━━━━━━━━━━━━━━━━━━");
+  sections.push("<i>Chúc Sếp một ngày làm việc rực rỡ! 🚀✨</i>");
 
   try {
     await deleteTempMessage(ctx, loadingMessageId);
@@ -1592,26 +1592,26 @@ async function buildTodayDashboardTextForChat(chatId, from = {}) {
   const viewerName = account?.fullName || account?.username || `${from.first_name || ""} ${from.last_name || ""}`.trim();
 
   const sections = [
-    "ðŸš€ <b>DASHBOARD Tá»”NG Há»¢P HÃ”M NAY</b>",
-    `ðŸ“… NgÃ y: <code>${new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date)}</code>`,
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+    "🚀 <b>DASHBOARD TỔNG HỢP HÔM NAY</b>",
+    `📅 Ngày: <code>${new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date)}</code>`,
+    "━━━━━━━━━━━━━━━━━━━━",
     ""
   ];
 
   try {
     const duty = await fetchDutyScheduleByDate(date);
-    sections.push("ðŸ“‹ <b>Lá»‹ch trá»±c</b>");
+    sections.push("📋 <b>Lịch trực</b>");
     const dutyText = formatDutyScheduleHtml(duty, viewerName);
-    const dutyBody = dutyText.split("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”").pop().trim();
-    sections.push(dutyBody || "ðŸ“­ KhÃ´ng cÃ³ dá»¯ liá»‡u lá»‹ch trá»±c.");
+    const dutyBody = dutyText.split("━━━━━━━━━━━━━━━━━━━━").pop().trim();
+    sections.push(dutyBody || "📭 Không có dữ liệu lịch trực.");
   } catch (error) {
-    sections.push("ðŸ“‹ <b>Lá»‹ch trá»±c</b>");
-    sections.push("âŒ Lá»—i táº£i lá»‹ch trá»±c Google Sheet.");
+    sections.push("📋 <b>Lịch trực</b>");
+    sections.push("❌ Lỗi tải lịch trực Google Sheet.");
   }
 
   if (account?.hermesUsername) {
-    sections.push("", "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-    sections.push("ðŸ—“ï¸ <b>Lá»‹ch lÃ m viá»‡c</b>");
+    sections.push("", "━━━━━━━━━━━━━━━━━━━━");
+    sections.push("🗓️ <b>Lịch làm việc</b>");
 
     const work = await enqueue(() => getWorkScheduleByDay({
       username: account.hermesUsername,
@@ -1627,9 +1627,9 @@ async function buildTodayDashboardTextForChat(chatId, from = {}) {
     if (work.ok) {
       const workText = formatWorkScheduleResult(work);
       const workBody = workText.split("________________________________").pop().trim();
-      sections.push(workBody || "âœ¨ HÃ´m nay Sáº¿p thong dong, chÆ°a tháº¥y lá»‹ch há»— trá»£ nÃ o.");
+      sections.push(workBody || "✨ Hôm nay Sếp thong dong, chưa thấy lịch hỗ trợ nào.");
     } else {
-      sections.push(`âŒ KhÃ´ng láº¥y Ä‘Æ°á»£c lá»‹ch: ${work.message || "Lá»—i Hermes"}`);
+      sections.push(`❌ Không lấy được lịch: ${work.message || "Lỗi Hermes"}`);
     }
 
     const kpi = await enqueue(() => getKpiSummary());
@@ -1648,20 +1648,20 @@ async function buildTodayDashboardTextForChat(chatId, from = {}) {
           storageState: account.hermesSession,
           month: nowMonth
         }));
-        row.roomRevenue = revenueResult.ok ? revenueResult.value : "Äang cáº­p nháº­t...";
+        row.roomRevenue = revenueResult.ok ? revenueResult.value : "Đang cập nhật...";
 
-        sections.push("", "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-        sections.push("ðŸŽ¯ <b>KPI Tá»”NG Há»¢P</b>");
+        sections.push("", "━━━━━━━━━━━━━━━━━━━━");
+        sections.push("🎯 <b>KPI TỔNG HỢP</b>");
         const kpiText = formatKpiMonthTelegramHtml(monthData, row);
-        const kpiParts = kpiText.split("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-        const kpiBody = kpiParts.slice(2, 4).join("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”").trim();
+        const kpiParts = kpiText.split("━━━━━━━━━━━━━━━━━━━━");
+        const kpiBody = kpiParts.slice(2, 4).join("━━━━━━━━━━━━━━━━━━━━").trim();
         sections.push(kpiBody || kpiText);
       }
     }
   }
 
-  sections.push("", "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-  sections.push("<i>ChÃºc Sáº¿p má»™t ngÃ y lÃ m viá»‡c rá»±c rá»¡! ðŸš€âœ¨</i>");
+  sections.push("", "━━━━━━━━━━━━━━━━━━━━");
+  sections.push("<i>Chúc Sếp một ngày làm việc rực rỡ! 🚀✨</i>");
   return sections.join("\n");
 }
 
@@ -1715,7 +1715,7 @@ async function showWorkScheduleWeek(ctx, date = new Date()) {
   const account = await getHermesAccountOrReply(ctx);
   if (!account) return;
 
-  const loadingMessageId = await sendTempMessage(ctx, "Äang kiá»ƒm tra lá»‹ch cáº£ tuáº§n Hermes...");
+  const loadingMessageId = await sendTempMessage(ctx, "Đang kiểm tra lịch cả tuần Hermes...");
   try {
     const results = [];
     let storageState = account.hermesSession || null;
@@ -1732,11 +1732,11 @@ async function showWorkScheduleWeek(ctx, date = new Date()) {
       if (result.sessionExpired) await clearHermesSession(ctx.chat.id);
       if (result.otpRequired) {
         pendingActions.set(ctx.chat.id, { stage: "hermes_schedule_otp", date: targetDate });
-        await replyFresh(ctx, "Hermes yÃªu cáº§u OTP giá»¯a lÃºc láº¥y lá»‹ch tuáº§n. Sáº¿p gá»­i mÃ£ OTP má»›i nháº¥t rá»“i báº¥m láº¡i giÃºp em. /cancel Ä‘á»ƒ huá»·.");
+        await replyFresh(ctx, "Hermes yêu cầu OTP giữa lúc lấy lịch tuần. Sếp gửi mã OTP mới nhất rồi bấm lại giúp em. /cancel để huỷ.");
         return;
       }
       if (!result.ok) {
-        await replyFresh(ctx, `KhÃ´ng láº¥y Ä‘Æ°á»£c lá»‹ch tuáº§n.\n${String(result.message || "Lá»—i khÃ´ng xÃ¡c Ä‘á»‹nh").slice(0, 700)}`, keyboard());
+        await replyFresh(ctx, `Không lấy được lịch tuần.\n${String(result.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
         return;
       }
       if (result.storageState) {
@@ -1771,7 +1771,7 @@ bot.start(async (ctx) => {
 });
 
 bot.command("id", async (ctx) => {
-  await ctx.reply(`Telegram ID cá»§a Sáº¿p: ${getTelegramId(ctx)}`);
+  await ctx.reply(`Telegram ID của Sếp: ${getTelegramId(ctx)}`);
 });
 
 bot.command("menu", async (ctx) => {
@@ -1805,7 +1805,7 @@ bot.command("cancel", async (ctx) => {
     await cancelHermesOtpSession();
   }
   pendingActions.delete(ctx.chat.id);
-  await ctx.reply("ÄÃ£ huá»· thao tÃ¡c Ä‘ang Ä‘á»£i.", Markup.removeKeyboard());
+  await ctx.reply("?ã huỷ thao tác đang đợi.", Markup.removeKeyboard());
 });
 
 bot.command("deletehermes", async (ctx) => {
@@ -1828,8 +1828,8 @@ bot.command("sethermes", async (ctx) => {
   if (parts.length < 3) {
     pendingActions.set(ctx.chat.id, { stage: "hermes_credentials" });
     await ctx.reply([
-      "Nháº­p user vÃ  password Hermes trong tin nháº¯n tiáº¿p theo.",
-      "Máº«u:",
+      "Nhập user và password Hermes trong tin nhắn tiếp theo.",
+      "Mẫu:",
       "username Abc123@"
     ].join("\n"));
     return;
@@ -1837,14 +1837,14 @@ bot.command("sethermes", async (ctx) => {
   const hermesUsername = parts[1];
   const hermesPassword = parts.slice(2).join(" ");
   await saveHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id, telegramUser: ctx.from, hermesUsername, hermesPassword });
-  await ctx.reply(`ÄÃ£ lÆ°u tÃ i khoáº£n Hermes cho ${hermesUsername}. Äang test Ä‘Äƒng nháº­p...`);
+  await ctx.reply(`?ã lưu tài khoản Hermes cho ${hermesUsername}. Đang test đăng nhập...`);
   const result = await enqueue(() => validateHermesLogin({ username: hermesUsername, password: hermesPassword, keepOtpSession: true }));
   if (result.otpRequired) {
     pendingActions.set(ctx.chat.id, { stage: "hermes_otp" });
-    await ctx.reply("Hermes Ä‘ang yÃªu cáº§u OTP. Sáº¿p gá»­i mÃ£ OTP vÃ o tin nháº¯n tiáº¿p theo nhÃ©. /cancel Ä‘á»ƒ huá»·.");
+    await ctx.reply("Hermes đang yêu cầu OTP. Sếp gửi mã OTP vào tin nhắn tiếp theo nhé. /cancel để huỷ.");
     return;
   }
-  await ctx.reply(result.ok ? result.message : `LÆ°u rá»“i nhÆ°ng test Hermes lá»—i: ${result.message}`, keyboard());
+  await ctx.reply(result.ok ? result.message : `Lưu rồi nhưng test Hermes lỗi: ${result.message}`, keyboard());
 });
 
 bot.command("today", async (ctx) => {
@@ -1855,10 +1855,10 @@ bot.command("truc", async (ctx) => {
   const date = parseScheduleCommandDate(ctx.message.text);
   if (!date) {
     await ctx.reply([
-      "NgÃ y khÃ´ng há»£p lá»‡ Sáº¿p.",
-      "Máº«u dÃ¹ng:",
+      "Ngày không hợp lệ Sếp.",
+      "Mẫu dùng:",
       "/truc",
-      "/truc hÃ´m nay",
+      "/truc hôm nay",
       "/truc mai",
       "/truc 29/04",
       "/truc 29/04/2026"
@@ -1876,21 +1876,21 @@ bot.command("testtruc", async (ctx) => {
   const text = String(ctx.message?.text || "").toLowerCase();
   const isTomorrow = /mai|tomorrow|17/.test(text);
   const targetDate = isTomorrow ? getRelativeWorkScheduleDate(1, new Date()) : new Date();
-  const reasonLabel = isTomorrow ? "TEST - 17:00 - lá»‹ch trá»±c ngÃ y mai" : "TEST - lá»‹ch trá»±c hÃ´m nay";
-  const loading = await sendTempMessage(ctx, "Äang test thÃ´ng bÃ¡o lá»‹ch trá»±c...");
+  const reasonLabel = isTomorrow ? "TEST - 17:00 - lịch trực ngày mai" : "TEST - lịch trực hôm nay";
+  const loading = await sendTempMessage(ctx, "Đang test thông báo lịch trực...");
   try {
     const result = await fetchDutyScheduleByDate(targetDate);
     const accounts = await getAllHermesAccounts({ secret: config.botSecretKey });
     const mentionLines = formatDutyMatchedMentions(result, accounts);
-    const mentionSection = mentionLines.length ? ["âœ… <b>Báº N CÃ“ Lá»ŠCH TRá»°C</b>", ...mentionLines] : [];
+    const mentionSection = mentionLines.length ? ["✅ <b>BẠN CÓ LỊCH TRỰC</b>", ...mentionLines] : [];
     const dateLabel = new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(targetDate);
     const textMessage = [
-      "ðŸ”” <b>TEST NHáº®C Lá»ŠCH TRá»°C</b>",
-      "â° <b>Má»‘c nháº¯c:</b> " + escapeHtml(reasonLabel),
-      "ðŸ“… <b>NgÃ y trá»±c:</b> <code>" + escapeHtml(dateLabel) + "</code>",
-      "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+      "🔔 <b>TEST NHẮC LỊCH TRỰC</b>",
+      "⏰ <b>Mốc nhắc:</b> " + escapeHtml(reasonLabel),
+      "📅 <b>Ngày trực:</b> <code>" + escapeHtml(dateLabel) + "</code>",
+      "━━━━━━━━━━━━━━━━━━━━",
       formatDutyScheduleHtml(result, "", { includePersonalSection: false }),
-      "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
+      "━━━━━━━━━━━━━━━━━━━━",
       ...mentionSection
     ].join("\n");
     await ctx.reply(textMessage, { parse_mode: "HTML", disable_web_page_preview: true });
@@ -1901,11 +1901,11 @@ bot.command("testtruc", async (ctx) => {
 
 
 bot.command("testnotify", async (ctx) => {
-  const loading = await sendTempMessage(ctx, "Äang test thÃ´ng bÃ¡o Hermes...");
+  const loading = await sendTempMessage(ctx, "Đang test thông báo Hermes...");
   try {
     const account = await getHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id });
     if (!account?.hermesUsername || !account?.hermesPassword) {
-      await ctx.reply("Anh chÆ°a lÆ°u tÃ i khoáº£n Hermes. DÃ¹ng /sethermes trÆ°á»›c nhÃ©.");
+      await ctx.reply("Anh chưa lưu tài khoản Hermes. Dùng /sethermes trước nhé.");
       return;
     }
 
@@ -1918,19 +1918,19 @@ bot.command("testnotify", async (ctx) => {
       await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
     }
     if (!result.ok) {
-      await ctx.reply(`KhÃ´ng táº£i Ä‘Æ°á»£c thÃ´ng bÃ¡o Hermes.\n${String(result.message || "Lá»—i khÃ´ng xÃ¡c Ä‘á»‹nh").slice(0, 700)}`);
+      await ctx.reply(`Không tải được thông báo Hermes.\n${String(result.message || "Lỗi không xác định").slice(0, 700)}`);
       return;
     }
 
     const notification = (result.notifications || [])[0];
     if (!notification) {
-      await ctx.reply("Hiá»‡n chÆ°a Ä‘á»c Ä‘Æ°á»£c thÃ´ng bÃ¡o thay Ä‘á»•i tráº¡ng thÃ¡i phiáº¿u nÃ o tá»« Hermes.");
+      await ctx.reply("Hiện chưa đọc được thông báo thay đổi trạng thái phiếu nào từ Hermes.");
       return;
     }
 
     await ctx.reply([
-      "ðŸ§ª <b>TEST THÃ”NG BÃO HERMES</b>",
-      "Tin bÃªn dÆ°á»›i lÃ  thÃ´ng bÃ¡o má»›i nháº¥t bot Ä‘á»c Ä‘Æ°á»£c tá»« Hermes.",
+      "🧪 <b>TEST THÔNG BÁO HERMES</b>",
+      "Tin bên dưới là thông báo mới nhất bot đọc được từ Hermes.",
       ""
     ].join("\n"), { parse_mode: "HTML" });
     await ctx.reply(formatHermesNotificationHtml(notification), {
@@ -1938,8 +1938,8 @@ bot.command("testnotify", async (ctx) => {
       disable_web_page_preview: false,
       ...Markup.inlineKeyboard([
         [
-          ...(notification.requestOrderId ? [Markup.button.callback("ðŸ‘ï¸ View chi tiáº¿t", `action:view_request_order:${notification.requestOrderId}`)] : []),
-          Markup.button.callback("ðŸ  Trang chá»§", "action:menu")
+          ...(notification.requestOrderId ? [Markup.button.callback("👁️ View chi tiết", `action:view_request_order:${notification.requestOrderId}`)] : []),
+          Markup.button.callback("🏠 Trang chủ", "action:menu")
         ]
       ])
     });
@@ -1951,10 +1951,10 @@ bot.command(["lich", "schedule", "workschedule"], async (ctx) => {
   const date = parseScheduleCommandDate(ctx.message.text);
   if (!date) {
     await ctx.reply([
-      "NgÃ y khÃ´ng há»£p lá»‡ Sáº¿p.",
-      "Máº«u dÃ¹ng:",
+      "Ngày không hợp lệ Sếp.",
+      "Mẫu dùng:",
       "/lich",
-      "/lich hÃ´m nay",
+      "/lich hôm nay",
       "/lich mai",
       "/lich 28/04",
       "/lich 28/04/2026"
@@ -1997,8 +1997,8 @@ bot.action("action:hermes_account_menu", async (ctx) => {
   await ctx.answerCbQuery();
   const account = await getHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id });
   const summary = account?.hermesUsername
-    ? `ðŸ” <b>TÃ i khoáº£n Hermes</b>\nÄang lÆ°u: <b>${escapeHtml(account.hermesUsername)}</b>`
-    : "ðŸ” <b>TÃ i khoáº£n Hermes</b>\nChÆ°a lÆ°u tÃ i khoáº£n.";
+    ? `🔐 <b>Tài khoản Hermes</b>\nĐang lưu: <b>${escapeHtml(account.hermesUsername)}</b>`
+    : "🔐 <b>Tài khoản Hermes</b>\nChưa lưu tài khoản.";
   await replyFresh(ctx, summary, {
     parse_mode: "HTML",
     ...accountMenuKeyboard()
@@ -2006,44 +2006,44 @@ bot.action("action:hermes_account_menu", async (ctx) => {
 });
 
 bot.action("action:hermes_work", async (ctx) => {
-  await ctx.answerCbQuery("Äang láº¥y lá»‹ch hÃ´m nay...");
+  await ctx.answerCbQuery("Đang lấy lịch hôm nay...");
   await showWorkSchedule(ctx, new Date());
 });
 
 bot.action(/^action:hermes_work_offset:(-?\d+)$/, async (ctx) => {
   const offset = Number(ctx.match?.[1] || 0);
-  await ctx.answerCbQuery("Äang láº¥y lá»‹ch...");
+  await ctx.answerCbQuery("Đang lấy lịch...");
   await showWorkSchedule(ctx, getRelativeWorkScheduleDate(offset));
 });
 
 bot.action(/^action:hermes_work_date:(\d{4}-\d{2}-\d{2}):(-?\d+)$/, async (ctx) => {
   const baseDate = parseWorkScheduleDateInput(ctx.match?.[1]);
   const offset = Number(ctx.match?.[2] || 0);
-  await ctx.answerCbQuery("Äang láº¥y lá»‹ch...");
+  await ctx.answerCbQuery("Đang lấy lịch...");
   await showWorkSchedule(ctx, getRelativeWorkScheduleDate(offset, baseDate || new Date()));
 });
 
 bot.action("action:today_dashboard", async (ctx) => {
-  await ctx.answerCbQuery("Äang ghÃ©p dashboard hÃ´m nay...");
+  await ctx.answerCbQuery("Đang ghép dashboard hôm nay...");
   await showTodayDashboard(ctx);
 });
 
 bot.action("action:duty_today", async (ctx) => {
-  await ctx.answerCbQuery("Äang láº¥y lá»‹ch trá»±c...");
+  await ctx.answerCbQuery("Đang lấy lịch trực...");
   await showDutySchedule(ctx, new Date());
 });
 
 bot.action(/^action:duty_date:(\d{4}-\d{2}-\d{2}):(-?\d+)$/, async (ctx) => {
   const baseDate = parseWorkScheduleDateInput(ctx.match?.[1]);
   const offset = Number(ctx.match?.[2] || 0);
-  await ctx.answerCbQuery("Äang láº¥y lá»‹ch trá»±c...");
+  await ctx.answerCbQuery("Đang lấy lịch trực...");
   await showDutySchedule(ctx, getRelativeWorkScheduleDate(offset, baseDate || new Date()));
 });
 
 bot.action(/^action:duty_week:?(\d{4}-\d{2}-\d{2})?$/, async (ctx) => {
   const dateStr = ctx.match?.[1];
   const date = dateStr ? parseWorkScheduleDateInput(dateStr) : new Date();
-  await ctx.answerCbQuery("Äang láº¥y lá»‹ch trá»±c cáº£ tuáº§n...");
+  await ctx.answerCbQuery("Đang lấy lịch trực cả tuần...");
   await showDutyScheduleWeek(ctx, date);
 });
 
@@ -2055,7 +2055,7 @@ bot.action("action:duty_other", async (ctx) => {
 bot.action(/^action:hermes_work_week:?(\d{4}-\d{2}-\d{2})?$/, async (ctx) => {
   const dateStr = ctx.match?.[1];
   const date = dateStr ? parseWorkScheduleDateInput(dateStr) : new Date();
-  await ctx.answerCbQuery("Äang láº¥y lá»‹ch cáº£ tuáº§n...");
+  await ctx.answerCbQuery("Đang lấy lịch cả tuần...");
   await showWorkScheduleWeek(ctx, date);
 });
 
@@ -2079,14 +2079,14 @@ bot.action("action:hermes_account", async (ctx) => {
   await ctx.answerCbQuery();
   const account = await getHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id });
   if (account?.hermesUsername) {
-    await replyFresh(ctx, `Äang lÆ°u tÃ i khoáº£n Hermes: ${account.hermesUsername}\nMuá»‘n Ä‘á»•i thÃ¬ gá»­i /sethermes.`, accountMenuKeyboard());
+    await replyFresh(ctx, `Đang lưu tài khoản Hermes: ${account.hermesUsername}\nMuốn đổi thì gửi /sethermes.`, accountMenuKeyboard());
     return;
   }
   pendingActions.set(ctx.chat.id, { stage: "hermes_credentials" });
   await replyFresh(ctx, [
-    "ChÆ°a lÆ°u tÃ i khoáº£n Hermes.",
-    "Gá»­i user vÃ  password Hermes trong tin nháº¯n tiáº¿p theo.",
-    "Máº«u:",
+    "Chưa lưu tài khoản Hermes.",
+    "Gửi user và password Hermes trong tin nhắn tiếp theo.",
+    "Mẫu:",
     "username Abc123@"
   ].join("\n"), accountMenuKeyboard());
 });
@@ -2111,12 +2111,12 @@ bot.action(/^action:hermes_work_detail:(.+):(\d+)$/, async (ctx) => {
   const cached = workScheduleCache.get(cacheKey);
   await ctx.answerCbQuery();
   if (!cached) {
-    await replyFresh(ctx, "Dá»¯ liá»‡u lá»‹ch Ä‘Ã£ háº¿t háº¡n. Sáº¿p báº¥m láº¥y lá»‹ch láº¡i nhÃ©.", keyboard());
+    await replyFresh(ctx, "Dữ liệu lịch đã hết hạn. Sếp bấm lấy lịch lại nhé.", keyboard());
     return;
   }
   const entry = cached.result.entries?.[index];
   if (!entry) {
-    await replyFresh(ctx, "KhÃ´ng tÃ¬m tháº¥y má»¥c lá»‹ch nÃ y. Sáº¿p báº¥m láº¥y lá»‹ch láº¡i nhÃ©.", workScheduleKeyboard(cached.result, cacheKey));
+    await replyFresh(ctx, "Không tìm thấy mục lịch này. Sếp bấm lấy lịch lại nhé.", workScheduleKeyboard(cached.result, cacheKey));
     return;
   }
   const requestOrderId = getRequestOrderIdFromScheduleEntry(entry);
@@ -2130,7 +2130,7 @@ bot.action(/^action:hermes_work_detail:(.+):(\d+)$/, async (ctx) => {
 
   const account = await getHermesAccountOrReply(ctx);
   if (!account) return;
-  const loadingMessageId = await sendTempMessage(ctx, "Äang láº¥y chi tiáº¿t PYC tháº­t tá»« Hermes...");
+  const loadingMessageId = await sendTempMessage(ctx, "Đang lấy chi tiết PYC thật từ Hermes...");
   const detail = await enqueue(() => getRequestOrderDetailById({
     username: account.hermesUsername,
     password: account.hermesPassword,
@@ -2143,7 +2143,7 @@ bot.action(/^action:hermes_work_detail:(.+):(\d+)$/, async (ctx) => {
   if (detail.sessionExpired) await clearHermesSession(ctx.chat.id);
   if (detail.otpRequired) {
     pendingActions.set(ctx.chat.id, { stage: "hermes_schedule_otp", date: cached.result.targetDate });
-    await replyFresh(ctx, "PhiÃªn Hermes Ä‘Ã£ háº¿t háº¡n nÃªn Hermes yÃªu cáº§u OTP láº¡i. Sáº¿p gá»­i mÃ£ OTP má»›i nháº¥t rá»“i báº¥m lá»‹ch láº¡i nhÃ©. /cancel Ä‘á»ƒ huá»·.");
+    await replyFresh(ctx, "Phiên Hermes đã hết hạn nên Hermes yêu cầu OTP lại. Sếp gửi mã OTP mới nhất rồi bấm lịch lại nhé. /cancel để huỷ.");
     return;
   }
   if (!detail.ok) {
@@ -2176,13 +2176,13 @@ bot.action(/^action:hermes_work_detail:(.+):(\d+)$/, async (ctx) => {
 bot.action(/^action:view_request_order:(.+)$/, async (ctx) => {
   const requestOrderId = ctx.match?.[1];
   if (!requestOrderId || requestOrderId === "undefined") {
-    await ctx.answerCbQuery("KhÃ´ng láº¥y Ä‘Æ°á»£c mÃ£ phiáº¿u.");
+    await ctx.answerCbQuery("Không lấy được mã phiếu.");
     return;
   }
   await ctx.answerCbQuery();
   const account = await getHermesAccountOrReply(ctx);
   if (!account) return;
-  const loadingMessageId = await sendTempMessage(ctx, "Äang láº¥y chi tiáº¿t phiáº¿u tá»« Hermes...");
+  const loadingMessageId = await sendTempMessage(ctx, "Đang lấy chi tiết phiếu từ Hermes...");
   const detail = await enqueue(() => getRequestOrderDetailById({
     username: account.hermesUsername,
     password: account.hermesPassword,
@@ -2194,11 +2194,11 @@ bot.action(/^action:view_request_order:(.+)$/, async (ctx) => {
   if (detail.sessionExpired) await clearHermesSession(ctx.chat.id);
   if (detail.otpRequired) {
     pendingActions.set(ctx.chat.id, { stage: "hermes_schedule_otp", date: new Date() });
-    await replyFresh(ctx, "PhiÃªn Hermes Ä‘Ã£ háº¿t háº¡n nÃªn Hermes yÃªu cáº§u OTP láº¡i. Sáº¿p gá»­i mÃ£ OTP má»›i nháº¥t rá»“i báº¥m xem láº¡i nhÃ©. /cancel Ä‘á»ƒ huá»·.");
+    await replyFresh(ctx, "Phiên Hermes đã hết hạn nên Hermes yêu cầu OTP lại. Sếp gửi mã OTP mới nhất rồi bấm xem lại nhé. /cancel để huỷ.");
     return;
   }
   if (!detail.ok) {
-    await replyFresh(ctx, `KhÃ´ng táº£i Ä‘Æ°á»£c chi tiáº¿t phiáº¿u.\n${detail.message || "Lá»—i Hermes"}`, keyboard());
+    await replyFresh(ctx, `Không tải được chi tiết phiếu.\n${detail.message || "Lỗi Hermes"}`, keyboard());
     return;
   }
   if (detail.storageState) {
@@ -2207,7 +2207,7 @@ bot.action(/^action:view_request_order:(.+)$/, async (ctx) => {
   await replyFresh(ctx, formatRequestOrderDetailHtml(detail.order, { checkedAt: detail.checkedAt }), {
     parse_mode: "HTML",
     disable_web_page_preview: true,
-    ...Markup.inlineKeyboard([[Markup.button.callback("ðŸ  Vá» trang chá»§", "action:menu")]])
+    ...Markup.inlineKeyboard([[Markup.button.callback("🏠 Về trang chủ", "action:menu")]])
   });
 });
 bot.action(/^action:hermes_work_list:(.+)$/, async (ctx) => {
@@ -2215,7 +2215,7 @@ bot.action(/^action:hermes_work_list:(.+)$/, async (ctx) => {
   const cached = workScheduleCache.get(cacheKey);
   await ctx.answerCbQuery();
   if (!cached) {
-    await replyFresh(ctx, "Dá»¯ liá»‡u lá»‹ch Ä‘Ã£ háº¿t háº¡n. Sáº¿p báº¥m láº¥y lá»‹ch láº¡i nhÃ©.", keyboard());
+    await replyFresh(ctx, "Dữ liệu lịch đã hết hạn. Sếp bấm lấy lịch lại nhé.", keyboard());
     return;
   }
   await replyFresh(ctx, formatWorkScheduleResult(cached.result), {
@@ -2228,26 +2228,26 @@ bot.on("text", async (ctx) => {
   const text = (ctx.message?.text || "").trim();
   
   if (text === "/testauto" || text.startsWith("/testauto@")) {
-    await ctx.reply("â³ Äang giáº£ láº­p cháº¡y thÃ´ng bÃ¡o tá»± Ä‘á»™ng (Cronjob)...");
+    await ctx.reply("⏳ Đang giả lập chạy thông báo tự động (Cronjob)...");
     try {
       await checkDutyScheduleReminders();
       await checkDashboardReminder();
-      // Báº¯n tháº³ng hÃ m notify Ä‘á»ƒ test náº¿u giá» khÃ´ng khá»›p
+      // Bắn thẳng hàm notify để test nếu giờ không khớp
       await notifyTodayDashboard();
-      await notifyDutyScheduleForDate(new Date(), "Test lá»‡nh tá»± Ä‘á»™ng");
-      await ctx.reply("âœ… ÄÃ£ cháº¡y xong hÃ m tá»± Ä‘á»™ng!");
+      await notifyDutyScheduleForDate(new Date(), "Test lệnh tự động");
+      await ctx.reply("✅ ?ã chạy xong hàm tự động!");
     } catch (error) {
-      await ctx.reply(`âŒ Lá»—i khi test tá»± Ä‘á»™ng: ${error.message}`);
+      await ctx.reply(`❌ Lỗi khi test tự động: ${error.message}`);
     }
     return;
   }
 
   if (text === "/testnotify" || text.startsWith("/testnotify@")) {
-    await ctx.reply("â³ Äang quÃ©t thá»­ thÃ´ng bÃ¡o Hermes Ä‘á»ƒ xem cÃ³ láº¥y Ä‘Æ°á»£c API khÃ´ng...");
+    await ctx.reply("⏳ Đang quét thử thông báo Hermes để xem có lấy được API không...");
     try {
       const account = await getHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id });
       if (!account?.hermesUsername) {
-        await ctx.reply("Sáº¿p chÆ°a lÆ°u tÃ i khoáº£n Hermes.");
+        await ctx.reply("Sếp chưa lưu tài khoản Hermes.");
         return;
       }
       
@@ -2258,28 +2258,28 @@ bot.on("text", async (ctx) => {
       }));
       
       if (!result.ok) {
-        await ctx.reply(`âŒ QuÃ©t tháº¥t báº¡i: ${result.message || "Lá»—i khÃ´ng xÃ¡c Ä‘á»‹nh"}\nSession expired: ${Boolean(result.sessionExpired)}`);
+        await ctx.reply(`❌ Quét thất bại: ${result.message || "Lỗi không xác định"}\nSession expired: ${Boolean(result.sessionExpired)}`);
         return;
       }
       
       const notifs = result.notifications || [];
-      const notifsText = notifs.slice(0, 3).map((n, i) => `${i+1}. [${n.status}] ${n.title}\nKey: ${n.key}\nChi tiáº¿t: ${String(n.message).slice(0, 50)}...`).join("\n\n");
-      await ctx.reply(`âœ… QuÃ©t thÃ nh cÃ´ng, tÃ¬m tháº¥y ${notifs.length} thÃ´ng bÃ¡o má»›i nháº¥t trÃªn trang.\n\nTop 3 thÃ´ng bÃ¡o bot Ä‘ang Ä‘á»c Ä‘Æ°á»£c lÃ :\n${notifsText || "KhÃ´ng cÃ³ thÃ´ng bÃ¡o nÃ o."}\n\nSáº¿p kiá»ƒm tra xem máº¥y cÃ¡i top nÃ y cÃ³ giá»‘ng vá»›i thÃ´ng bÃ¡o thá»±c táº¿ Sáº¿p Ä‘ang tháº¥y trÃªn web khÃ´ng nhÃ©!`);
+      const notifsText = notifs.slice(0, 3).map((n, i) => `${i+1}. [${n.status}] ${n.title}\nKey: ${n.key}\nChi tiết: ${String(n.message).slice(0, 50)}...`).join("\n\n");
+      await ctx.reply(`✅ Quét thành công, tìm thấy ${notifs.length} thông báo mới nhất trên trang.\n\nTop 3 thông báo bot đang đọc được là:\n${notifsText || "Không có thông báo nào."}\n\nSếp kiểm tra xem mấy cái top này có giống với thông báo thực tế Sếp đang thấy trên web không nhé!`);
     } catch (error) {
-      await ctx.reply(`âŒ Lá»—i há»‡ thá»‘ng: ${error.message}`);
+      await ctx.reply(`❌ Lỗi hệ thống: ${error.message}`);
     }
     return;
   }
 
   const pending = pendingActions.get(ctx.chat.id);
   if (!pending) {
-    await ctx.reply("Em chÆ°a hiá»ƒu lá»‡nh nÃ y. Gá»­i /lich hoáº·c /menu nhÃ© Sáº¿p.", keyboard());
+    await ctx.reply("Em chưa hiểu lệnh này. Gửi /lich hoặc /menu nhé Sếp.", keyboard());
     return;
   }
 
   if (pending.stage === "hermes_otp") {
     const otp = extractOtp(ctx.message.text);
-    const loadingMessageId = await sendTempMessage(ctx, "Äang xÃ¡c nháº­n OTP Hermes...");
+    const loadingMessageId = await sendTempMessage(ctx, "Đang xác nhận OTP Hermes...");
     const result = await enqueue(() => submitHermesOtp(otp));
     await deleteTempMessage(ctx, loadingMessageId);
     if (result.otpRequired) {
@@ -2292,8 +2292,8 @@ bot.on("text", async (ctx) => {
     }
     if (!result.ok) {
       const msg = result.storageState 
-        ? `âœ… XÃ¡c nháº­n OTP thÃ nh cÃ´ng (Ä‘Ã£ lÆ°u phiÃªn Ä‘Äƒng nháº­p).\nâŒ Lá»—i táº£i dá»¯ liá»‡u: ${result.message}`
-        : `âŒ XÃ¡c nháº­n OTP lá»—i: ${result.message}`;
+        ? `✅ Xác nhận OTP thành công (đã lưu phiên đăng nhập).\n❌ Lỗi tải dữ liệu: ${result.message}`
+        : `❌ Xác nhận OTP lỗi: ${result.message}`;
       await replyFresh(ctx, msg, keyboard());
       return;
     }
@@ -2330,7 +2330,7 @@ bot.on("text", async (ctx) => {
   if (pending.stage === "duty_schedule_date") {
     const date = parseWorkScheduleDateInput(text);
     if (!date) {
-      await ctx.reply("NgÃ y chÆ°a Ä‘Ãºng Ä‘á»‹nh dáº¡ng rá»“i Sáº¿p. VÃ­ dá»¥: 29/04, 29/04/2026, hÃ´m nay, mai.");
+      await ctx.reply("Ngày chưa đúng định dạng rồi Sếp. Ví dụ: 29/04, 29/04/2026, hôm nay, mai.");
       return;
     }
     pendingActions.delete(ctx.chat.id);
@@ -2340,7 +2340,7 @@ bot.on("text", async (ctx) => {
 
   if (pending.stage === "hermes_schedule_otp") {
     const otp = extractOtp(ctx.message.text);
-    const loadingMessageId = await sendTempMessage(ctx, "Äang xÃ¡c nháº­n OTP Hermes vÃ  láº¥y lá»‹ch...");
+    const loadingMessageId = await sendTempMessage(ctx, "Đang xác nhận OTP Hermes và lấy lịch...");
     const result = await enqueue(() => submitHermesOtpAndGetWorkSchedule(otp, pending.date || new Date()));
     await deleteTempMessage(ctx, loadingMessageId);
     if (result.otpRequired) {
@@ -2353,8 +2353,8 @@ bot.on("text", async (ctx) => {
     }
     if (!result.ok) {
       const msg = result.storageState 
-        ? `âœ… XÃ¡c nháº­n OTP thÃ nh cÃ´ng (Ä‘Ã£ lÆ°u phiÃªn Ä‘Äƒng nháº­p).\nâŒ NhÆ°ng lá»—i khi láº¥y lá»‹ch: ${result.message}\n(Sáº¿p cÃ³ thá»ƒ thá»­ gá»­i láº¡i lá»‡nh /lich vÃ¬ tÃ i khoáº£n Ä‘Ã£ Ä‘Äƒng nháº­p thÃ nh cÃ´ng)`
-        : `âŒ XÃ¡c nháº­n OTP lá»—i: ${result.message}`;
+        ? `✅ Xác nhận OTP thành công (đã lưu phiên đăng nhập).\n❌ Nhưng lỗi khi lấy lịch: ${result.message}\n(Sếp có thể thử gửi lại lệnh /lich vì tài khoản đã đăng nhập thành công)`
+        : `❌ Xác nhận OTP lỗi: ${result.message}`;
       await replyFresh(ctx, msg, keyboard());
       return;
     }
@@ -2369,7 +2369,7 @@ bot.on("text", async (ctx) => {
   if (pending.stage === "hermes_schedule_date") {
     const date = parseWorkScheduleDateInput(ctx.message.text);
     if (!date) {
-      await ctx.reply("NgÃ y khÃ´ng há»£p lá»‡ Sáº¿p. Gá»­i theo máº«u 28/04 hoáº·c 28/04/2026, hoáº·c /cancel Ä‘á»ƒ huá»·.");
+      await ctx.reply("Ngày không hợp lệ Sếp. Gửi theo mẫu 28/04 hoặc 28/04/2026, hoặc /cancel để huỷ.");
       return;
     }
     pendingActions.delete(ctx.chat.id);
@@ -2381,9 +2381,9 @@ bot.on("text", async (ctx) => {
     const parts = ctx.message.text.trim().split(/\s+/);
     if (parts.length < 2) {
       await ctx.reply([
-        "ChÆ°a Ä‘Ãºng máº«u nháº­p.",
-        "Gá»­i láº¡i user vÃ  password Hermes trÃªn cÃ¹ng 1 dÃ²ng.",
-        "VÃ­ dá»¥:",
+        "Chưa đúng mẫu nhập.",
+        "Gửi lại user và password Hermes trên cùng 1 dòng.",
+        "Ví dụ:",
         "username Abc123@"
       ].join("\n"));
       return;
@@ -2392,25 +2392,25 @@ bot.on("text", async (ctx) => {
     const hermesPassword = parts.slice(1).join(" ");
     await saveHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id, telegramUser: ctx.from, hermesUsername, hermesPassword });
     pendingActions.delete(ctx.chat.id);
-    const loadingMessageId = await sendTempMessage(ctx, `ÄÃ£ lÆ°u tÃ i khoáº£n Hermes cho ${hermesUsername}. Äang test Ä‘Äƒng nháº­p...`);
+    const loadingMessageId = await sendTempMessage(ctx, `?ã lưu tài khoản Hermes cho ${hermesUsername}. Đang test đăng nhập...`);
     const result = await enqueue(() => validateHermesLogin({ username: hermesUsername, password: hermesPassword, keepOtpSession: true }));
     await deleteTempMessage(ctx, loadingMessageId);
     if (result.otpRequired) {
       pendingActions.set(ctx.chat.id, { stage: "hermes_otp" });
-      await replyFresh(ctx, "Hermes Ä‘ang yÃªu cáº§u OTP. Sáº¿p gá»­i mÃ£ OTP vÃ o tin nháº¯n tiáº¿p theo nhÃ©. /cancel Ä‘á»ƒ huá»·.");
+      await replyFresh(ctx, "Hermes đang yêu cầu OTP. Sếp gửi mã OTP vào tin nhắn tiếp theo nhé. /cancel để huỷ.");
       return;
     }
     if (result.ok && result.storageState) {
       await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
     }
-    await replyFresh(ctx, result.ok ? result.message : `LÆ°u rá»“i nhÆ°ng test Hermes lá»—i: ${result.message}`, keyboard());
+    await replyFresh(ctx, result.ok ? result.message : `Lưu rồi nhưng test Hermes lỗi: ${result.message}`, keyboard());
   }
 });
 
 bot.catch((error, ctx) => {
   console.error("Hermes schedule bot error:", error);
   import("fs").then(m => m.appendFileSync("hermes_error_trace.txt", new Date().toISOString() + "\n" + (error.stack || error) + "\n\n"));
-  if (ctx?.reply) ctx.reply("Bot lá»‹ch Hermes gáº·p lá»—i ngoÃ i dá»± kiáº¿n. Xem log Ä‘á»ƒ biáº¿t chi tiáº¿t.").catch(() => {});
+  if (ctx?.reply) ctx.reply("Bot lịch Hermes gặp lỗi ngoài dự kiến. Xem log để biết chi tiết.").catch(() => {});
 });
 
 
@@ -2425,32 +2425,32 @@ function cleanHermesNotifyText(value = "") {
 function formatHermesStatus(value = "") {
   const raw = String(value || "").trim();
   const map = {
-    RO_CHANGE_STATUS: "Thay Ä‘á»•i tráº¡ng thÃ¡i phiáº¿u",
-    RO_CREATE: "Táº¡o phiáº¿u má»›i",
-    RO_ASSIGN: "ÄÆ°á»£c phÃ¢n cÃ´ng xá»­ lÃ½",
-    RO_COMMENT: "CÃ³ bÃ¬nh luáº­n má»›i",
-    RO_REMIND: "Nháº¯c xá»­ lÃ½ phiáº¿u",
-    RO_CHANGE_PROCESSOR: "Thay Ä‘á»•i ngÆ°á»i xá»­ lÃ½"
+    RO_CHANGE_STATUS: "Thay đổi trạng thái phiếu",
+    RO_CREATE: "Tạo phiếu mới",
+    RO_ASSIGN: "Được phân công xử lý",
+    RO_COMMENT: "Có bình luận mới",
+    RO_REMIND: "Nhắc xử lý phiếu",
+    RO_CHANGE_PROCESSOR: "Thay đổi người xử lý"
   };
-  return map[raw] || raw || "CÃ³ cáº­p nháº­t";
+  return map[raw] || raw || "Có cập nhật";
 }
 
 function formatHermesNotificationHtml(notification = {}) {
-  const title = cleanHermesNotifyText(notification.title || "ThÃ´ng bÃ¡o Hermes");
-  const rawTicket = notification.ticketCode || notification.requestOrderId || "ChÆ°a rÃµ";
+  const title = cleanHermesNotifyText(notification.title || "Thông báo Hermes");
+  const rawTicket = notification.ticketCode || notification.requestOrderId || "Chưa rõ";
   const link = notification.link || (notification.requestOrderId ? `https://hermes.ipos.vn/request-order/${notification.requestOrderId}` : "");
   const ticketDisplay = link ? `<a href="${escapeHtml(link)}">${escapeHtml(rawTicket)}</a>` : `<code>${escapeHtml(rawTicket)}</code>`;
   const status = formatHermesStatus(notification.status);
   const message = cleanHermesNotifyText(notification.message || "");
   return [
-    "ðŸ”” <b>THÃ”NG BÃO HERMES</b>",
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
-    `ðŸ“Œ <b>Ná»™i dung:</b> ${escapeHtml(title)}`,
-    `ðŸŽ« <b>Phiáº¿u yÃªu cáº§u:</b> ${ticketDisplay}`,
-    `ðŸ”„ <b>Tráº¡ng thÃ¡i:</b> ${escapeHtml(status)}`,
-    message ? `ðŸ“ <b>Chi tiáº¿t:</b>\n${escapeHtml(message).slice(0, 1200)}` : "",
-    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”",
-    "Anh báº¥m nÃºt bÃªn dÆ°á»›i Ä‘á»ƒ xem chi tiáº¿t phiáº¿u yÃªu cáº§u."
+    "🔔 <b>THÔNG BÁO HERMES</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    `📌 <b>Nội dung:</b> ${escapeHtml(title)}`,
+    `🎫 <b>Phiếu yêu cầu:</b> ${ticketDisplay}`,
+    `🔄 <b>Trạng thái:</b> ${escapeHtml(status)}`,
+    message ? `📝 <b>Chi tiết:</b>\n${escapeHtml(message).slice(0, 1200)}` : "",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "Anh bấm nút bên dưới để xem chi tiết phiếu yêu cầu."
   ].filter(Boolean).join("\n");
 }
 
@@ -2488,8 +2488,8 @@ async function checkHermesNotifications() {
           disable_web_page_preview: false,
           ...Markup.inlineKeyboard([
             [
-              ...(notification.requestOrderId ? [Markup.button.callback("ðŸ‘ï¸ View chi tiáº¿t", `action:view_request_order:${notification.requestOrderId}`)] : []),
-              Markup.button.callback("ðŸ  Trang chá»§", "action:menu")
+              ...(notification.requestOrderId ? [Markup.button.callback("👁️ View chi tiết", `action:view_request_order:${notification.requestOrderId}`)] : []),
+              Markup.button.callback("🏠 Trang chủ", "action:menu")
             ]
           ])
         });
@@ -2516,12 +2516,12 @@ async function checkAllHermesSessions() {
       console.log(`[MONITOR] Hermes session for ${account.hermesUsername} (Chat: ${account.chatId}) has expired.`);
       await updateHermesNotificationState(account.chatId, { hermesSessionExpired: true });
       await bot.telegram.sendMessage(account.chatId, [
-        "âš ï¸ <b>THÃ”NG BÃO: PHIÃŠN HERMES Háº¾T Háº N</b>",
+        "⚠️ <b>THÔNG BÁO: PHIÊN HERMES HẾT HẠN</b>",
         "",
-        `TÃ i khoáº£n <b>${account.hermesUsername}</b> cá»§a Sáº¿p Ä‘Ã£ háº¿t háº¡n Ä‘Äƒng nháº­p trÃªn Hermes.`,
-        "Äá»ƒ Ä‘áº£m báº£o dá»¯ liá»‡u Lá»‹ch lÃ m viá»‡c vÃ  Doanh thu luÃ´n sáºµn sÃ ng, Sáº¿p hÃ£y dÃ¹ng lá»‡nh /lich Ä‘á»ƒ Ä‘Äƒng nháº­p láº¡i nhÃ©!",
+        `Tài khoản <b>${account.hermesUsername}</b> của Sếp đã hết hạn đăng nhập trên Hermes.`,
+        "Để đảm bảo dữ liệu Lịch làm việc và Doanh thu luôn sẵn sàng, Sếp hãy dùng lệnh /lich để đăng nhập lại nhé!",
         "",
-        "<i>Bot sáº½ táº¡m dá»«ng cáº­p nháº­t doanh thu cho Ä‘áº¿n khi cÃ³ phiÃªn má»›i.</i>"
+        "<i>Bot sẽ tạm dừng cập nhật doanh thu cho đến khi có phiên mới.</i>"
       ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
     }
   }
@@ -2533,7 +2533,7 @@ acquireInstanceLock()
     console.log("Hermes schedule Telegram bot is running.");
     await syncTelegramCommandMenu();
     if (config.startupNotify) {
-      await notifyAllowedUsers("Bot lá»‹ch Hermes Ä‘Ã£ khá»Ÿi Ä‘á»™ng OK.");
+      await notifyAllowedUsers("Bot lịch Hermes đã khởi động OK.");
     }
     
     // Start session monitoring

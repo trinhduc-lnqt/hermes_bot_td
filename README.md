@@ -1,4 +1,4 @@
-﻿# Hermes Telegram Bot
+# Hermes Telegram Bot
 
 Bot Telegram riêng cho Hermes: lịch làm việc, lịch trực, KPI, doanh thu phòng, dashboard tổng hợp và thông báo thay đổi trạng thái phiếu yêu cầu.
 

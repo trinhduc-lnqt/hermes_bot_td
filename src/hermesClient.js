@@ -463,20 +463,62 @@ function formatHermesDateTime(date, endOfDay = false) {
   return `${toHermesLocalDate(date)} ${endOfDay ? "23:59:59" : "00:00:00"}`;
 }
 
-function buildScheduleUrl(targetDate) {
+function encodeHermesScheduleDateTime(value) {
+  return String(value).replace(" ", "%20");
+}
+
+function buildScheduleUrl(targetDate, page = 0) {
   const baseUrl = getHermesBaseUrl();
   if (!baseUrl) {
     throw new Error("Chua cau hinh HERMES_BASE_URL/HERMES_LOGIN_URL.");
   }
   const { start, end } = getWeekRange(targetDate);
-  const params = new URLSearchParams({
-    startTime: formatHermesDateTime(start),
-    endTime: formatHermesDateTime(end, true),
-    deptCode: "HAN_SUPPORT",
-    teamId: "5fe9bcb15885324fa7a01a02",
-    page: "0"
-  });
-  return `${baseUrl}/api/support-online/working-schedule/list?${params.toString()}`;
+  const query = [
+    `startTime=${encodeHermesScheduleDateTime(formatHermesDateTime(start))}`,
+    `endTime=${encodeHermesScheduleDateTime(formatHermesDateTime(end, true))}`,
+    "deptCode=HAN_SUPPORT",
+    "teamId=5fe9bcb15885324fa7a01a02",
+    `page=${Number(page) || 0}`
+  ].join("&");
+  return `${baseUrl}/api/support-online/working-schedule/list?${query}`;
+}
+
+function formatDatePickerRange(date) {
+  const { start, end } = getWeekRange(date);
+  const format = (value) => {
+    const [year, month, day] = toHermesLocalDate(value).split("-");
+    return `${day}/${month}/${year}`;
+  };
+  return `${format(start)} - ${format(end)}`;
+}
+
+async function triggerScheduleWeekInUi(page, targetDate) {
+  const rangeText = formatDatePickerRange(targetDate);
+  const startDay = String(Number(toHermesLocalDate(getWeekRange(targetDate).start).slice(8, 10)));
+  const endDay = String(Number(toHermesLocalDate(getWeekRange(targetDate).end).slice(8, 10)));
+  const dateInput = page.locator('input.trigger-click, input[matinput]').filter({ hasText: /^$/ }).nth(0);
+
+  try {
+    const inputs = page.locator("input");
+    const count = await inputs.count();
+    for (let index = 0; index < count; index += 1) {
+      const input = inputs.nth(index);
+      const value = await input.inputValue().catch(() => "");
+      if (/\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}\/\d{2}\/\d{4}/.test(value)) {
+        if (value === rangeText) return;
+        await input.click({ force: true });
+        await page.waitForTimeout(300);
+        await page.getByText(startDay, { exact: true }).first().click({ force: true });
+        await page.waitForTimeout(300);
+        await page.getByText(endDay, { exact: true }).first().click({ force: true });
+        await page.waitForTimeout(4000);
+        return;
+      }
+    }
+    await dateInput.click({ force: true });
+  } catch {
+    // If the date picker cannot be driven, the caller will fall back to API/DOM extraction.
+  }
 }
 
 function buildRequestOrderUrl(id) {
@@ -540,6 +582,22 @@ function parseScheduleResponse(text) {
     return data.data.content;
   }
   return [];
+}
+
+function scheduleResponseMayHaveMorePages(text) {
+  const data = parseJsonSafe(text);
+  if (!data || typeof data !== "object") return false;
+  const roots = [data, data.data, data.result].filter((item) => item && typeof item === "object" && !Array.isArray(item));
+  for (const root of roots) {
+    if (root.last === false || root.hasNext === true || root.hasMore === true) return true;
+    const totalPages = Number(root.totalPages || root.totalPage || root.pages || root.pageCount);
+    const page = Number(root.page ?? root.number ?? root.currentPage ?? root.pageIndex ?? 0);
+    if (Number.isFinite(totalPages) && totalPages > 0 && Number.isFinite(page) && page + 1 < totalPages) return true;
+    const total = Number(root.total || root.totalElements || root.totalRecords || root.totalCount);
+    const size = Number(root.size || root.pageSize || root.numPerPage || root.limit || root.perPage);
+    if (Number.isFinite(total) && Number.isFinite(size) && size > 0 && Number.isFinite(page) && (page + 1) * size < total) return true;
+  }
+  return false;
 }
 
 function isPlainObject(value) {
@@ -1166,31 +1224,73 @@ async function loginHermesPage({ username, password, purpose = "work_schedule" }
   return { ok: true, browser, context, page, apiResponses };
 }
 
-async function readScheduleFromLoggedInPage(page, apiResponses, targetDate, username = "") {
+async function readScheduleFromLoggedInPage(page, apiResponses, targetDate, username = "", options = {}) {
   const viewer = makeHermesViewerIdentity(username);
   const scheduleUrl = new URL("/support-working-schedule", config.hermesLoginUrl).toString();
   await page.goto(scheduleUrl, { waitUntil: "domcontentloaded", timeout: config.timeoutMs }).catch(() => {});
   await page.waitForTimeout(7000);
+  await triggerScheduleWeekInUi(page, targetDate);
 
   if (await hasVisibleOtpInput(page) || !(await isLoggedIn(page))) {
     return { ok: false, sessionExpired: true, message: "Phiên Hermes đã hết hạn hoặc bị yêu cầu đăng nhập lại." };
   }
 
-  const apiUrl = buildScheduleUrl(targetDate);
-  const fetched = await page.evaluate(async (url) => {
-    const response = await fetch(url, { credentials: "include" });
-    return { status: response.status, body: await response.text() };
-  }, apiUrl).catch(() => null);
-  if (fetched) {
+  const targetDateText = toHermesLocalDate(targetDate);
+  const buildResult = (entries, resultDateText = targetDateText) => ({
+    ok: true,
+    targetDate: resultDateText,
+    checkedAt: new Date(),
+    entries,
+    message: entries.length ? "Co lich lam viec." : "Khong co lich lam viec."
+  });
+  const collectWeekEntries = () => {
+    const startDate = getWeekRange(targetDate).start;
+    const results = [];
+    for (let offset = 0; offset < 7; offset += 1) {
+      const day = getRelativeWorkScheduleDate(offset, startDate);
+      const dayText = toHermesLocalDate(day);
+      let dayEntries = normalizeScheduleEntriesFromApi(apiResponses, day, viewer);
+      dayEntries = filterScheduleEntriesForViewer(dayEntries, viewer, dayText);
+      results.push({
+        ok: true,
+        targetDate: dayText,
+        checkedAt: new Date(),
+        entries: dayEntries,
+        message: dayEntries.length ? "Co lich lam viec." : "Khong co lich lam viec."
+      });
+    }
+    return results;
+  };
+
+  if (options.fetchFullWeek) {
+    const weekResults = collectWeekEntries();
+    if (weekResults.some(r => r.entries.length > 0)) {
+      return { ok: true, weekResults };
+    }
+  }
+
+  let entries = normalizeScheduleEntriesFromApi(apiResponses, targetDate, viewer);
+  entries = filterScheduleEntriesForViewer(entries, viewer, targetDateText);
+  if (entries.length) return buildResult(entries);
+
+  for (let pageIndex = 0; !entries.length && pageIndex < 5; pageIndex += 1) {
+    const apiUrl = buildScheduleUrl(targetDate, pageIndex);
+    const fetched = await page.evaluate(async (url) => {
+      const response = await fetch(url, { credentials: "include" });
+      return { status: response.status, body: await response.text() };
+    }, apiUrl).catch(() => null);
+    if (!fetched) break;
+
     apiResponses.push({ url: apiUrl, method: "GET", status: fetched.status, requestBody: "", body: fetched.body });
     if ([401, 403].includes(fetched.status) || /login|unauthori[sz]ed|otp|forbidden/i.test(fetched.body || "")) {
       return { ok: false, sessionExpired: true, message: "Phiên Hermes đã hết hạn hoặc API yêu cầu đăng nhập lại." };
     }
+    if (!scheduleResponseMayHaveMorePages(fetched.body)) break;
   }
 
-  const targetDateText = toHermesLocalDate(targetDate);
-  let entries = normalizeScheduleEntriesFromApi(apiResponses, targetDate, viewer);
-  entries = filterScheduleEntriesForViewer(entries, viewer, targetDateText);
+  if (options.fetchFullWeek) {
+    return { ok: true, weekResults: collectWeekEntries() };
+  }
   if (!entries.length) {
     entries = await extractScheduleEntriesFromDom(page, targetDate, viewer);
     entries = filterScheduleEntriesForViewer(entries, viewer, targetDateText);
@@ -1204,13 +1304,7 @@ async function readScheduleFromLoggedInPage(page, apiResponses, targetDate, user
     }
   }
 
-  return {
-    ok: true,
-    targetDate: targetDateText,
-    checkedAt: new Date(),
-    entries,
-    message: entries.length ? "Co lich lam viec." : "Khong co lich lam viec."
-  };
+  return buildResult(entries);
 }
 
 
@@ -1640,6 +1734,15 @@ function getWorkScheduleTypeLabel(entry = {}) {
   return getScheduleRequestOrderTypeLabel(entry) || entry?.type || "L\u1ECBch l\u00E0m vi\u1EC7c";
 }
 
+function getWorkScheduleTypeWithProductLabel(entry = {}) {
+  const type = getWorkScheduleTypeLabel(entry);
+  const product = usefulText(entry?.product);
+  if (!product || String(type).toLowerCase().includes(product.toLowerCase())) {
+    return type;
+  }
+  return `${type} (${product})`;
+}
+
 export function formatWorkScheduleNoteOnlyDetail(entry, result = {}) {
   const target = fromHermesLocalDate(entry?.date || result.targetDate);
   const targetLabel = new Intl.DateTimeFormat("vi-VN", {
@@ -1651,7 +1754,7 @@ export function formatWorkScheduleNoteOnlyDetail(entry, result = {}) {
   }).format(target || new Date());
   const ticket = formatScheduleTicketHtml(entry);
   const lines = [
-    `\uD83D\uDCDD <b>${htmlValue(getWorkScheduleTypeLabel(entry))}</b>${ticket ? ` - ${ticket}` : ""}`,
+    `\uD83D\uDCDD <b>${htmlValue(getWorkScheduleTypeWithProductLabel(entry))}</b>${ticket ? ` - ${ticket}` : ""}`,
     "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501",
     `\uD83D\uDCC5 <b>Ng\u00E0y:</b> ${htmlValue(targetLabel)}`,
     `\uD83D\uDD50 <b>Ca:</b> ${htmlValue(getScheduleShiftLabel(entry) || "Ch\u01B0a x\u00E1c \u0111\u1ECBnh")}`,
@@ -1759,18 +1862,17 @@ function formatScheduleTicketHtml(entry = {}) {
 }
 
 export function formatWorkScheduleSummaryLine(entry) {
-  const main = getScheduleRequestOrderTypeLabel(entry) || entry?.type || "Ch\u01B0a x\u00E1c \u0111\u1ECBnh";
+  const main = getWorkScheduleTypeWithProductLabel(entry) || "Ch\u01B0a x\u00E1c \u0111\u1ECBnh";
   const shift = getScheduleShiftLabel(entry);
   const parts = [main, entry?.ticket, shift].filter(Boolean);
   return parts.join(" - ");
 }
 
 function formatWorkScheduleSummaryHtml(entry) {
-  const main = htmlValue(getScheduleRequestOrderTypeLabel(entry) || entry?.type || "Ch\u01B0a x\u00E1c \u0111\u1ECBnh");
+  const main = htmlValue(getWorkScheduleTypeWithProductLabel(entry) || "Ch\u01B0a x\u00E1c \u0111\u1ECBnh");
   const ticket = formatScheduleTicketHtml(entry);
-  const product = entry?.product ? htmlValue(entry.product) : "";
   const customer = entry?.customer ? htmlValue(entry.customer) : "";
-  return [ticket, main, product, customer].filter(Boolean).join(" - ");
+  return [ticket, main, customer].filter(Boolean).join(" - ");
 }
 
 export function formatWorkScheduleResult(result) {
@@ -2070,7 +2172,7 @@ export async function getKpiSummary() {
   }
 }
 
-export async function getWorkScheduleByDay({ username, password, date = new Date(), storageState = null }) {
+export async function getWorkScheduleByDay({ username, password, date = new Date(), storageState = null, fetchFullWeek = false }) {
   if (!config.hermesLoginUrl) {
     return { ok: false, message: "Chua cau hinh HERMES_LOGIN_URL." };
   }
@@ -2078,7 +2180,7 @@ export async function getWorkScheduleByDay({ username, password, date = new Date
   if (storageState) {
     const session = await createHermesBrowserContext(storageState);
     try {
-      const result = await readScheduleFromLoggedInPage(session.page, session.apiResponses, date, username);
+      const result = await readScheduleFromLoggedInPage(session.page, session.apiResponses, date, username, { fetchFullWeek });
       if (result.ok) {
         return {
           ...result,
@@ -2102,7 +2204,7 @@ export async function getWorkScheduleByDay({ username, password, date = new Date
   }
 
   try {
-    const result = await readScheduleFromLoggedInPage(login.page, login.apiResponses, date, username);
+    const result = await readScheduleFromLoggedInPage(login.page, login.apiResponses, date, username, { fetchFullWeek });
     return {
       ...result,
       storageState: result.ok ? await login.context.storageState().catch(() => null) : null
@@ -2514,7 +2616,6 @@ export async function getHermesNotifications({ username, password, storageState 
     await login.browser.close().catch(() => {});
   }
 }
-
 
 
 

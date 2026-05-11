@@ -176,3 +176,15 @@ Sau lần cập nhật thủ công này, bot sẽ có lệnh `/update` để cá
 
 Nếu `git status` báo có file local bị sửa, kiểm tra kỹ trước khi pull để tránh mất cấu hình. File `.env` và thư mục `data/` đã được ignore nên bình thường không cản update.
 
+
+### Version bot
+
+Bắt đầu từ bản này version là `1.0.0` trong `package.json`.
+
+Mỗi lần anh đẩy bản update mới, tăng version trước khi commit để dễ phân biệt bản đang chạy:
+
+```bash
+npm version patch --no-git-tag-version
+```
+
+Ví dụ `1.0.0` -> `1.0.1`. Bot sẽ hiển thị version trong `/status`, thông báo khởi động và kết quả `/update`.

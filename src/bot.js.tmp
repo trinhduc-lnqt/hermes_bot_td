@@ -761,19 +761,10 @@ function formatWeekScheduleResult(results, checkedAt = new Date()) {
   const checkedTime = new Intl.DateTimeFormat("vi-VN", { timeStyle: "medium", timeZone: config.timezoneId }).format(checkedAt);
 
   let weekLabel = "Lịch làm việc cả tuần";
-  if (results.length > 0) {
-    const firstTarget = parseWorkScheduleDateInput(results[0].targetDate) || new Date(results[0].targetDate);
-    const weekStart = new Date(firstTarget);
-    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() || 7) - 1));
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    const fmt = new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      timeZone: config.timezoneId
-    });
-    weekLabel = `Lịch làm việc cả tuần (${fmt.format(weekStart)} - ${fmt.format(weekEnd)})`;
+  if (results && results.length > 0) {
+    const firstDate = results[0].targetDate.split("-").reverse().join("/");
+    const lastDate = results[results.length - 1].targetDate.split("-").reverse().join("/");
+    weekLabel = `Lịch làm việc cả tuần (${firstDate} - ${lastDate})`;
   }
 
   const lines = [
@@ -794,11 +785,11 @@ function formatWeekScheduleResult(results, checkedAt = new Date()) {
       year: "numeric",
       timeZone: config.timezoneId
     }).format(target);
-    lines.push(`🔹 <b>${label.toUpperCase()}</b>`);
+    lines.push(`🗓️ <b>${label}</b>`);
     
     if (!result.entries?.length) {
-      lines.push("   <i>- Chưa có lịch làm việc -</i>");
-      lines.push("┈┈┈┈┈┈┈┈┈┈┈┈┈");
+      lines.push("  - Chưa có lịch làm việc");
+      lines.push("");
       continue;
     }
 
@@ -815,14 +806,14 @@ function formatWeekScheduleResult(results, checkedAt = new Date()) {
     for (const key of ["fullDay", "morning", "afternoon", "other"]) {
       const g = groups[key];
       if (g.items.length) {
-        lines.push(`   ${g.icon} <b>${g.label}</b>`);
+        lines.push(`  ${g.icon} <b>${g.label}</b>`);
         for (const e of g.items) {
-          lines.push(`     ${formatWeekScheduleEntryHtml(e, dayIndex)}`);
+          lines.push(`  ${formatWeekScheduleEntryHtml(e, dayIndex)}`);
           dayIndex++;
         }
       }
     }
-    lines.push("┈┈┈┈┈┈┈┈┈┈┈┈┈");
+    lines.push("");
   }
 
   return lines.join("\n");
@@ -1699,32 +1690,34 @@ async function showWorkScheduleWeek(ctx, date = new Date()) {
 
   const loadingMessageId = await sendTempMessage(ctx, "Đang kiểm tra lịch cả tuần Hermes...");
   try {
+    const results = [];
     let storageState = account.hermesSession || null;
-    const mondayDate = getRelativeWorkScheduleDate(-(new Date(date).getDay() || 7) + 1, date);
-    
-    const result = await enqueue(() => getWorkScheduleByDay({
-      username: account.hermesUsername,
-      password: account.hermesPassword,
-      date: mondayDate,
-      storageState,
-      fetchFullWeek: true
-    }));
 
-    if (result.sessionExpired) await clearHermesSession(ctx.chat.id);
-    if (result.otpRequired) {
-      pendingActions.set(ctx.chat.id, { stage: "hermes_schedule_otp", date: mondayDate });
-      await replyFresh(ctx, "Hermes yêu cầu OTP giữa lúc lấy lịch tuần. Sếp gửi mã OTP mới nhất rồi bấm lại giúp em. /cancel để huỷ.");
-      return;
-    }
-    if (!result.ok) {
-      await replyFresh(ctx, `Không lấy được lịch tuần.\n${String(result.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
-      return;
-    }
-    if (result.storageState) {
-      await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
-    }
+    for (let offset = 0; offset < 7; offset += 1) {
+      const targetDate = getRelativeWorkScheduleDate(offset, getRelativeWorkScheduleDate(-(new Date(date).getDay() || 7) + 1, date));
+      const result = await enqueue(() => getWorkScheduleByDay({
+        username: account.hermesUsername,
+        password: account.hermesPassword,
+        date: targetDate,
+        storageState
+      }));
 
-    const results = result.weekResults || [result];
+      if (result.sessionExpired) await clearHermesSession(ctx.chat.id);
+      if (result.otpRequired) {
+        pendingActions.set(ctx.chat.id, { stage: "hermes_schedule_otp", date: targetDate });
+        await replyFresh(ctx, "Hermes yêu cầu OTP giữa lúc lấy lịch tuần. Sếp gửi mã OTP mới nhất rồi bấm lại giúp em. /cancel để huỷ.");
+        return;
+      }
+      if (!result.ok) {
+        await replyFresh(ctx, `Không lấy được lịch tuần.\n${String(result.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
+        return;
+      }
+      if (result.storageState) {
+        storageState = result.storageState;
+        await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState });
+      }
+      results.push(result);
+    }
 
     await replyFresh(ctx, formatWeekScheduleResult(results), {
       parse_mode: "HTML",

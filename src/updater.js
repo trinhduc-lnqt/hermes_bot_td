@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { appVersionLabel } from "./version.js";
+
 const execFileAsync = promisify(execFile);
 const MAX_OUTPUT_LENGTH = 3500;
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -121,7 +123,7 @@ export async function updateFromGitHub() {
 
 export function formatUpdateResult(result) {
   const title = result.ok ? "✅ Cập nhật hoàn tất" : "❌ Cập nhật thất bại";
-  const lines = [title, "", result.message];
+  const lines = [title, `Phiên bản hiện tại: ${appVersionLabel}`, "", result.message];
 
   if (result.branch) lines.push(`Branch: ${result.branch}`);
   if (result.beforeRevision && result.afterRevision && result.beforeRevision !== result.afterRevision) {

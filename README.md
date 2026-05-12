@@ -106,7 +106,7 @@ npm run update:vps
 Repo GitHub dang dung:
 
 ```text
-https://github.com/trinhduc-lnqt/Ihr_hermes.git
+https://github.com/trinhduc-lnqt/hermes_bot_td.git
 ```
 
 Khi co ban moi can dua len GitHub:
@@ -114,7 +114,7 @@ Khi co ban moi can dua len GitHub:
 ```bash
 npm run release:local
 git status --short
-git add hermes_bot
+git add .
 git commit -m "release: hermes bot vX.Y.Z"
 git push origin main
 ```
@@ -138,7 +138,7 @@ Bien `.env` co the cau hinh:
 
 ```env
 GITHUB_VERSION_CHECK_ENABLED=true
-GITHUB_PACKAGE_URL=https://raw.githubusercontent.com/trinhduc-lnqt/Ihr_hermes/main/hermes_bot/package.json
+GITHUB_PACKAGE_URL=https://raw.githubusercontent.com/trinhduc-lnqt/hermes_bot_td/main/package.json
 GITHUB_VERSION_CHECK_INTERVAL_MINUTES=30
 ```
 

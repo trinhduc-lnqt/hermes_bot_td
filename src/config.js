@@ -57,7 +57,7 @@ const machineName =
 
 const wgTunnelName = (process.env.WG_TUNNEL_NAME || "").trim();
 const wgConfPath = (process.env.WG_CONF_PATH || "").trim();
-const defaultGithubPackageUrl = "https://raw.githubusercontent.com/trinhduc-lnqt/Ihr_hermes/main/hermes_bot/package.json";
+const defaultGithubPackageUrl = "https://raw.githubusercontent.com/trinhduc-lnqt/hermes_bot_td/main/package.json";
 
 export const config = {
   telegramToken: (process.env.TELEGRAM_BOT_TOKEN || "").trim(),

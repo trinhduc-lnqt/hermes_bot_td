@@ -1,17 +1,24 @@
 {
-    "name":  "hermes-telegram-bot",
-    "version":  "1.0.0",
-    "private":  true,
-    "type":  "module",
-    "scripts":  {
-                    "start":  "node ./src/bot.js",
-                    "bot":  "node ./src/bot.js",
-                    "install:browsers":  "playwright install chromium",
-                    "update:vps":  "bash ./scripts/update-vps.sh"
-                },
-    "dependencies":  {
-                         "dotenv":  "^16.4.5",
-                         "playwright":  "^1.53.0",
-                         "telegraf":  "^4.16.3"
-                     }
+  "name": "hermes-telegram-bot",
+  "version": "1.0.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node ./src/bot.js",
+    "bot": "node ./src/bot.js",
+    "install:browsers": "playwright install chromium",
+    "update:vps": "bash ./scripts/update-vps.sh",
+    "release:local": "node ./scripts/backup-and-version.js",
+    "deps:install": "npm install",
+    "deps:update": "npm update",
+    "deps:check": "npm outdated",
+    "deps:playwright": "playwright install chromium",
+    "github:status": "git status --short",
+    "github:push": "git push origin main"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "playwright": "^1.60.0",
+    "telegraf": "^4.16.3"
+  }
 }

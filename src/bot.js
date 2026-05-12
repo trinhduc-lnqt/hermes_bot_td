@@ -36,7 +36,9 @@ import {
   saveHermesSession,
   updateHermesNotificationState
 } from "./store.js";
+import { checkGithubVersion } from "./githubVersion.js";
 import { ICON, TEXT, buttonText, statusText } from "./ui.js";
+import { appVersion } from "./version.js";
 
 assertBotConfig();
 
@@ -51,6 +53,7 @@ let instanceLockServer = null;
 let queue = Promise.resolve();
 const sentDutyReminderKeys = new Set();
 const sentDashboardReminderKeys = new Set();
+let notifiedGithubVersion = null;
 
 const telegramCommands = [
   { command: "start", description: "Mở menu Hermes" },
@@ -1029,6 +1032,32 @@ async function notifyAllowedUsers(message, options = {}) {
     } catch (error) {
       console.warn(`Cannot send Telegram notification to ${telegramId}:`, error.message);
     }
+  }
+}
+
+async function checkGithubUpdateNotification() {
+  if (!config.githubVersionCheckEnabled || !config.githubPackageUrl) return;
+  try {
+    const result = await checkGithubVersion(config.githubPackageUrl);
+    if (!result.hasNewVersion) return;
+    if (notifiedGithubVersion === result.remoteVersion) return;
+    notifiedGithubVersion = result.remoteVersion;
+    await notifyAllowedUsers([
+      "🚀 <b>CÓ BẢN HERMES BOT MỚI TRÊN GITHUB</b>",
+      "",
+      `Bản đang chạy: <code>${escapeHtml(result.localVersion || appVersion)}</code>`,
+      `Bản mới: <code>${escapeHtml(result.remoteVersion)}</code>`,
+      "",
+      "Để cập nhật trên VPS/Git:",
+      "<code>npm run update:vps</code>",
+      "",
+      "Nếu dùng package global:",
+      "<code>npm i -g hermesbot@latest</code>",
+      "",
+      "Bot sẽ backup bản cũ và tăng version sau update."
+    ].join("\n"), { parse_mode: "HTML", disable_web_page_preview: true });
+  } catch (error) {
+    console.warn("Cannot check GitHub version:", error.message);
   }
 }
 
@@ -2466,6 +2495,11 @@ acquireInstanceLock()
     checkDashboardReminder().catch(console.error);
     setInterval(() => checkHermesNotifications().catch(console.error), 30 * 1000);
     checkHermesNotifications().catch(console.error);
+    setInterval(
+      () => checkGithubUpdateNotification().catch(console.error),
+      Math.max(config.githubVersionCheckIntervalMinutes, 5) * 60 * 1000
+    );
+    checkGithubUpdateNotification().catch(console.error);
   })
   .catch(async (error) => {
     console.error("Cannot launch Hermes schedule bot:", error);
@@ -2482,9 +2516,6 @@ process.once("SIGTERM", async () => {
   bot.stop("SIGTERM");
   await releaseInstanceLock();
 });
-
-
-
 
 
 

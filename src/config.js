@@ -57,6 +57,7 @@ const machineName =
 
 const wgTunnelName = (process.env.WG_TUNNEL_NAME || "").trim();
 const wgConfPath = (process.env.WG_CONF_PATH || "").trim();
+const defaultGithubPackageUrl = "https://raw.githubusercontent.com/trinhduc-lnqt/Ihr_hermes/main/hermes_bot/package.json";
 
 export const config = {
   telegramToken: (process.env.TELEGRAM_BOT_TOKEN || "").trim(),
@@ -77,6 +78,9 @@ export const config = {
   salaryNotifyCloseDay: toInteger(process.env.SALARY_NOTIFY_CLOSE_DAY, 10),
   heartbeatUrl: (process.env.HEARTBEAT_URL || "").trim(),
   heartbeatIntervalMinutes: toInteger(process.env.HEARTBEAT_INTERVAL_MINUTES, 5),
+  githubVersionCheckEnabled: toBoolean(process.env.GITHUB_VERSION_CHECK_ENABLED, true),
+  githubPackageUrl: (process.env.GITHUB_PACKAGE_URL || defaultGithubPackageUrl).trim(),
+  githubVersionCheckIntervalMinutes: toInteger(process.env.GITHUB_VERSION_CHECK_INTERVAL_MINUTES, 30),
   lockPort: toInteger(process.env.BOT_LOCK_PORT, 47831),
   locale: (process.env.IHR_LOCALE || "vi-VN").trim(),
   timezoneId: (process.env.IHR_TIMEZONE || "Asia/Ho_Chi_Minh").trim(),
@@ -102,4 +106,3 @@ export function assertBotConfig() {
     throw new Error("Missing required environment variable: BOT_SECRET_KEY");
   }
 }
-

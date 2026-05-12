@@ -95,6 +95,10 @@ export async function updateFromGitHub() {
     return { ok: true, changed: false, branch, beforeRevision, afterRevision: beforeRevision, steps, message: "Bot đã ở bản mới nhất." };
   }
 
+  const versionBackup = await run("node", ["./scripts/backup-and-version.js", "--backup-only"], { timeoutMs: 120000 });
+  steps.push(versionBackup);
+  if (!versionBackup.ok) return { ok: false, changed: false, steps, message: "Không tạo được backup/version trước khi cập nhật." };
+
   const pull = await run("git", ["pull", "--ff-only", "origin", branch], { timeoutMs: 120000 });
   steps.push(pull);
   if (!pull.ok) return { ok: false, changed: false, steps, message: "Pull thất bại, có thể cần xử lý merge thủ công." };
@@ -104,6 +108,11 @@ export async function updateFromGitHub() {
   if (!after.ok) return { ok: false, changed: true, steps, message: "Đã pull nhưng không đọc được commit mới." };
 
   const afterRevision = after.stdout.trim();
+
+  const versionBump = await run("node", ["./scripts/backup-and-version.js"], { timeoutMs: 120000 });
+  steps.push(versionBump);
+  if (!versionBump.ok) return { ok: false, changed: true, branch, beforeRevision, afterRevision, steps, message: "Đã pull code mới nhưng không tăng được version." };
+
   if (await hasPackageLockChanged(beforeRevision, afterRevision)) {
     const install = await run(npmCommand, ["install"], { timeoutMs: 300000 });
     steps.push(install);

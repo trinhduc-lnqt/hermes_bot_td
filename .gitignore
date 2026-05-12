@@ -1,0 +1,13 @@
+node_modules/
+.env
+data/*
+!data/*.example
+logs/
+*.log
+*.err.log
+*.tmp
+storage-state*.json
+
+tmp_check_notification_realtime.mjs
+hermes_error_trace.txt
+backups/

@@ -167,8 +167,18 @@ async function getVisibleOtpInputs(page) {
   return inputs;
 }
 
+function normalizeHermesOtp(otp) {
+  const text = String(otp || "").trim();
+  const labeledMatch = text.match(/(?:mã\s*otp|ma\s*otp|otp)\D*(\d{4,8})/i);
+  if (labeledMatch) {
+    return labeledMatch[1];
+  }
+  const digitGroups = text.match(/\d{4,8}/g) || [];
+  return digitGroups[0] || text.replace(/\s+/g, "");
+}
+
 async function fillOtp(page, otp) {
-  const normalizedOtp = String(otp || "").trim().replace(/\s+/g, "");
+  const normalizedOtp = normalizeHermesOtp(otp);
   const otpInputs = await getVisibleOtpInputs(page);
   if (otpInputs.length === 0) {
     throw new Error("Khong tim thay o nhap OTP tren trang Hermes.");
@@ -230,7 +240,7 @@ function createApiCapture(page) {
     if (!url.includes("/api/")) {
       return;
     }
-    if (response.request().resourceType() === "fetch" && !/\/api\/request-order\/get/i.test(url)) {
+    if (response.request().resourceType() === "fetch" && !/\/api\/request-order\/get|\/api\/user\/(pre-login|get-otp|verify|login)/i.test(url)) {
       return;
     }
     const request = response.request();
@@ -288,6 +298,23 @@ async function hasVisibleOtpInput(page) {
   return /\bOTP\b|mã xác thực|ma xac thuc|xác minh|xac minh|verification code/i.test(bodyText);
 }
 
+async function waitForHermesOtpInput(page, timeoutMs = 8000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await hasVisibleOtpInput(page)) {
+      return true;
+    }
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+function keepHermesOtpSession({ browser, context, page, username, apiResponses, purpose }) {
+  const timer = setTimeout(() => {
+    closeActiveHermesSession().catch(() => {});
+  }, Math.max(config.hermesOtpTimeoutMs, 60_000));
+  activeHermesSession = { browser, context, page, username, timer, apiResponses, purpose };
+}
 async function isLoggedIn(page) {
   const passwordStillVisible = await page.locator("input[type='password']").first().isVisible().catch(() => false);
   const currentUrl = page.url();
@@ -342,18 +369,22 @@ export async function validateHermesLogin({ username, password, keepOtpSession =
       return { ok: false, message: `Dang nhap Hermes that bai: ${errorText}` };
     }
 
-    if (await hasVisibleOtpInput(page)) {
+    if (await waitForHermesOtpInput(page)) {
       if (!keepOtpSession) {
         return { ok: false, otpRequired: true, message: "Hermes yeu cau OTP." };
       }
-      const timer = setTimeout(() => {
-        closeActiveHermesSession().catch(() => {});
-      }, Math.max(config.hermesOtpTimeoutMs, 60_000));
-      activeHermesSession = { browser, context, page, username, timer };
+      keepHermesOtpSession({ browser, context, page, username, apiResponses, purpose: "validate_login" });
       return { ok: false, otpRequired: true, message: "Hermes yeu cau OTP. Hay gui ma OTP de em xac nhan tiep." };
     }
 
     if (!(await isLoggedIn(page))) {
+      if (await waitForHermesOtpInput(page, 5000)) {
+        if (!keepOtpSession) {
+          return { ok: false, otpRequired: true, message: "Hermes yeu cau OTP." };
+        }
+        keepHermesOtpSession({ browser, context, page, username, apiResponses, purpose: "validate_login" });
+        return { ok: false, otpRequired: true, message: "Hermes yeu cau OTP. Hay gui ma OTP de em xac nhan tiep." };
+      }
       return { ok: false, message: "Hermes van dung o man hinh dang nhap, kha nang sai tai khoan/mat khau." };
     }
 
@@ -374,18 +405,34 @@ export async function submitHermesOtp(otp) {
 
   const session = activeHermesSession;
   const { page } = session;
+  let shouldCloseSession = true;
+  let storageState = null;
   try {
     await fillOtp(page, otp);
     await clickOtpSubmit(page);
-    await page.waitForLoadState("networkidle", { timeout: config.timeoutMs }).catch(() => {});
-    await page.waitForTimeout(1500);
+    
+    let errorText = "";
+    let isLogged = false;
+    let hasOtpInput = true;
+    
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(500);
+      errorText = await readFirstText(page, ERROR_SELECTORS) || getApiErrorText(session.apiResponses || [], /\/api\/user\/(get-otp|verify|login)/i);
+      if (errorText) break;
+      
+      hasOtpInput = await hasVisibleOtpInput(page);
+      isLogged = await isLoggedIn(page);
+      
+      if (isLogged && !hasOtpInput) break;
+    }
 
-    const errorText = await readFirstText(page, ERROR_SELECTORS);
     if (errorText) {
+      shouldCloseSession = false;
       return { ok: false, message: `OTP Hermes that bai: ${errorText}` };
     }
 
     if (await hasVisibleOtpInput(page)) {
+      shouldCloseSession = false;
       return { ok: false, otpRequired: true, message: "Hermes van dang cho OTP. Ma vua nhap co the chua dung hoac chua du." };
     }
 
@@ -393,11 +440,14 @@ export async function submitHermesOtp(otp) {
       return { ok: false, message: "Da gui OTP nhung Hermes chua vao duoc trang sau dang nhap." };
     }
 
-    return { ok: true, message: "Dang nhap Hermes OK sau OTP." };
+    storageState = await session.context.storageState().catch(() => null);
+    return { ok: true, message: "Dang nhap Hermes OK sau OTP.", storageState };
   } catch (error) {
-    return { ok: false, message: error.message || "Khong xac nhan duoc OTP Hermes." };
+    return { ok: false, message: error.message || "Khong xac nhan duoc OTP Hermes.", storageState };
   } finally {
-    await closeActiveHermesSession();
+    if (shouldCloseSession) {
+      await closeActiveHermesSession();
+    }
   }
 }
 
@@ -1208,15 +1258,16 @@ async function loginHermesPage({ username, password, purpose = "work_schedule" }
     return { ok: false, message: `Dang nhap Hermes that bai: ${errorText}` };
   }
 
-  if (await hasVisibleOtpInput(page)) {
-    const timer = setTimeout(() => {
-      closeActiveHermesSession().catch(() => {});
-    }, Math.max(config.hermesOtpTimeoutMs, 60_000));
-    activeHermesSession = { browser, context, page, username, timer, apiResponses, purpose };
+  if (await waitForHermesOtpInput(page)) {
+    keepHermesOtpSession({ browser, context, page, username, apiResponses, purpose });
     return { ok: false, otpRequired: true, message: "Hermes yeu cau OTP. Hay gui ma OTP de em xac nhan tiep." };
   }
 
   if (!(await isLoggedIn(page))) {
+    if (await waitForHermesOtpInput(page, 5000)) {
+      keepHermesOtpSession({ browser, context, page, username, apiResponses, purpose });
+      return { ok: false, otpRequired: true, message: "Hermes yeu cau OTP. Hay gui ma OTP de em xac nhan tiep." };
+    }
     await browser.close().catch(() => {});
     return { ok: false, message: "Hermes van dung o man hinh dang nhap, kha nang sai tai khoan/mat khau." };
   }
@@ -2224,18 +2275,33 @@ export async function submitHermesOtpAndGetWorkSchedule(otp, date = new Date()) 
   const session = activeHermesSession;
   const { page } = session;
   let currentStorageState = null;
+  let shouldCloseSession = true;
   try {
     await fillOtp(page, otp);
     await clickOtpSubmit(page);
-    await page.waitForLoadState("networkidle", { timeout: config.timeoutMs }).catch(() => {});
-    await page.waitForTimeout(1500);
+    
+    let errorText = "";
+    let isLogged = false;
+    let hasOtpInput = true;
+    
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(500);
+      errorText = await readFirstText(page, ERROR_SELECTORS) || getApiErrorText(session.apiResponses || [], /\/api\/user\/(get-otp|verify|login)/i);
+      if (errorText) break;
+      
+      hasOtpInput = await hasVisibleOtpInput(page);
+      isLogged = await isLoggedIn(page);
+      
+      if (isLogged && !hasOtpInput) break;
+    }
 
-    const errorText = await readFirstText(page, ERROR_SELECTORS);
     if (errorText) {
+      shouldCloseSession = false;
       return { ok: false, message: `OTP Hermes that bai: ${errorText}` };
     }
 
     if (await hasVisibleOtpInput(page)) {
+      shouldCloseSession = false;
       return { ok: false, otpRequired: true, message: "Hermes van dang cho OTP. Ma vua nhap co the chua dung hoac chua du." };
     }
 
@@ -2253,7 +2319,9 @@ export async function submitHermesOtpAndGetWorkSchedule(otp, date = new Date()) 
   } catch (error) {
     return { ok: false, message: error.message || "Khong xac nhan duoc OTP Hermes.", storageState: currentStorageState };
   } finally {
-    await closeActiveHermesSession();
+    if (shouldCloseSession) {
+      await closeActiveHermesSession();
+    }
   }
 }
 
@@ -2268,10 +2336,22 @@ async function submitOtpForActiveHermesSession(otp) {
   try {
     await fillOtp(page, otp);
     await clickOtpSubmit(page);
-    await page.waitForLoadState("networkidle", { timeout: config.timeoutMs }).catch(() => {});
-    await page.waitForTimeout(1500);
+    
+    let errorText = "";
+    let isLogged = false;
+    let hasOtpInput = true;
+    
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(500);
+      errorText = await readFirstText(page, ERROR_SELECTORS) || getApiErrorText(session.apiResponses || [], /\/api\/user\/(get-otp|verify|login)/i);
+      if (errorText) break;
+      
+      hasOtpInput = await hasVisibleOtpInput(page);
+      isLogged = await isLoggedIn(page);
+      
+      if (isLogged && !hasOtpInput) break;
+    }
 
-    const errorText = await readFirstText(page, ERROR_SELECTORS);
     if (errorText) {
       return { ok: false, message: `OTP Hermes that bai: ${errorText}` };
     }

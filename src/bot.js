@@ -1,4 +1,4 @@
-﻿import net from "node:net";
+import net from "node:net";
 import { Markup, Telegraf } from "telegraf";
 
 import { getAllowedTelegramIds, isAuthorizedTelegramId } from "./access.js";
@@ -36,8 +36,11 @@ import {
   saveHermesSession,
   updateHermesNotificationState
 } from "./store.js";
+import { ICON, TEXT, buttonText, statusText } from "./ui.js";
 
 assertBotConfig();
+
+
 
 const bot = new Telegraf(config.telegramToken);
 const pendingActions = new Map();
@@ -71,6 +74,14 @@ function isPrivateChat(ctx) {
   return ctx.chat?.type === "private";
 }
 
+function isGroupChat(ctx) {
+  return ctx.chat?.type === "group" || ctx.chat?.type === "supergroup";
+}
+
+function isAllowedGroup(ctx) {
+  return config.allowedGroupIds.includes(String(ctx.chat?.id || ""));
+}
+
 function getTelegramId(ctx) {
   return String(ctx.from?.id || "");
 }
@@ -100,9 +111,9 @@ async function isAllowedUser(ctx) {
 
 function keyboard() {
   return Markup.inlineKeyboard([
-    [Markup.button.callback("📌 Tổng hợp", "action:today_dashboard"), Markup.button.callback("🎯 KPI", "action:hermes_kpi")],
-    [Markup.button.callback("📅 Lịch làm việc", "action:hermes_work_menu"), Markup.button.callback("📋 Lịch trực", "action:duty_menu")],
-    [Markup.button.callback("👤 Tài khoản Hermes", "action:hermes_account_menu")]
+    [Markup.button.callback(buttonText("dashboard", "menu"), "action:today_dashboard"), Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi")],
+    [Markup.button.callback(buttonText("workSchedule", "calendar"), "action:hermes_work_menu"), Markup.button.callback(buttonText("duty", "clipboard"), "action:duty_menu")],
+    [Markup.button.callback(buttonText("account", "user"), "action:hermes_account_menu")]
   ]);
 }
 
@@ -141,23 +152,23 @@ function workScheduleKeyboard(result, cacheKey) {
 
   for (let index = 0; index < Math.min(entries.length, 10); index += 2) {
     const row = [];
-    row.push(Markup.button.callback(`\uD83D\uDCC4 Xem l\u1ECBch ${index + 1}`, `action:hermes_work_detail:${cacheKey}:${index}`));
+    row.push(Markup.button.callback(`${ICON.detail} Xem lịch ${index + 1}`, `action:hermes_work_detail:${cacheKey}:${index}`));
     if (index + 1 < Math.min(entries.length, 10)) {
-      row.push(Markup.button.callback(`\uD83D\uDCC4 Xem l\u1ECBch ${index + 2}`, `action:hermes_work_detail:${cacheKey}:${index + 1}`));
+      row.push(Markup.button.callback(`${ICON.detail} Xem lịch ${index + 2}`, `action:hermes_work_detail:${cacheKey}:${index + 1}`));
     }
     rows.push(row);
   }
 
   const date = result.targetDate;
   rows.push([
-    Markup.button.callback("\u2B05\uFE0F Ng\u00E0y tr\u01B0\u1EDBc", `action:hermes_work_date:${date}:-1`),
-    Markup.button.callback("\uD83D\uDCC5 H\u00F4m nay", "action:hermes_work_offset:0"),
-    Markup.button.callback("Ng\u00E0y sau \u27A1\uFE0F", `action:hermes_work_date:${date}:1`)
+    Markup.button.callback(buttonText("previousDay", "back"), `action:hermes_work_date:${date}:-1`),
+    Markup.button.callback(buttonText("today", "calendar"), "action:hermes_work_offset:0"),
+    Markup.button.callback(`${TEXT.button.nextDay} ${ICON.next}`, `action:hermes_work_date:${date}:1`)
   ]);
   rows.push([
-    Markup.button.callback("\uD83D\uDDD3\uFE0F Xem c\u1EA3 tu\u1EA7n", `action:hermes_work_week:${date}`),
-    Markup.button.callback("\uD83D\uDCC6 Ch\u1ECDn ng\u00E0y", "action:hermes_work_other"),
-    Markup.button.callback("\uD83C\uDFE0 Trang ch\u1EE7", "action:menu")
+    Markup.button.callback(buttonText("week", "week"), `action:hermes_work_week:${date}`),
+    Markup.button.callback(buttonText("chooseDate", "calendar"), "action:hermes_work_other"),
+    Markup.button.callback(buttonText("home", "home"), "action:menu")
   ]);
   return Markup.inlineKeyboard(rows);
 }
@@ -165,16 +176,16 @@ function workScheduleKeyboard(result, cacheKey) {
 function workScheduleDetailKeyboard(result, cacheKey, entry = null) {
   const date = result?.targetDate || toHermesLocalDate(new Date());
   return Markup.inlineKeyboard([
-    [Markup.button.callback("\uD83D\uDCCB Quay l\u1EA1i danh s\u00E1ch", `action:hermes_work_list:${cacheKey}`)],
+    [Markup.button.callback(buttonText("backToList", "clipboard"), `action:hermes_work_list:${cacheKey}`)],
     [
-      Markup.button.callback("\u2B05\uFE0F Ng\u00E0y tr\u01B0\u1EDBc", `action:hermes_work_date:${date}:-1`),
-      Markup.button.callback("\uD83D\uDCC5 H\u00F4m nay", "action:hermes_work_offset:0"),
-      Markup.button.callback("Ng\u00E0y sau \u27A1\uFE0F", `action:hermes_work_date:${date}:1`)
+      Markup.button.callback(buttonText("previousDay", "back"), `action:hermes_work_date:${date}:-1`),
+      Markup.button.callback(buttonText("today", "calendar"), "action:hermes_work_offset:0"),
+      Markup.button.callback(`${TEXT.button.nextDay} ${ICON.next}`, `action:hermes_work_date:${date}:1`)
     ],
     [
-      Markup.button.callback("\uD83D\uDDD3\uFE0F Xem c\u1EA3 tu\u1EA7n", `action:hermes_work_week:${date}`),
-      Markup.button.callback("\uD83D\uDCC6 Ch\u1ECDn ng\u00E0y", "action:hermes_work_other"),
-      Markup.button.callback("\uD83C\uDFE0 Trang ch\u1EE7", "action:menu")
+      Markup.button.callback(buttonText("week", "week"), `action:hermes_work_week:${date}`),
+      Markup.button.callback(buttonText("chooseDate", "calendar"), "action:hermes_work_other"),
+      Markup.button.callback(buttonText("home", "home"), "action:menu")
     ]
   ]);
 }
@@ -185,14 +196,14 @@ function dutyKeyboard(date = new Date()) {
 
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback("\u2B05\uFE0F Ng\u00E0y tr\u01B0\u1EDBc", `action:duty_date:${targetDateText}:-1`),
-      Markup.button.callback("\uD83D\uDCC5 H\u00F4m nay", "action:duty_today"),
-      Markup.button.callback("Ng\u00E0y sau \u27A1\uFE0F", `action:duty_date:${targetDateText}:1`)
+      Markup.button.callback(buttonText("previousDay", "back"), `action:duty_date:${targetDateText}:-1`),
+      Markup.button.callback(buttonText("today", "calendar"), "action:duty_today"),
+      Markup.button.callback(`${TEXT.button.nextDay} ${ICON.next}`, `action:duty_date:${targetDateText}:1`)
     ],
     [
-      Markup.button.callback("\uD83D\uDDD3\uFE0F Xem c\u1EA3 tu\u1EA7n", `action:duty_week:${targetDateText}`),
-      Markup.button.callback("\uD83D\uDCC6 Ch\u1ECDn ng\u00E0y", "action:duty_other"),
-      Markup.button.callback("\uD83C\uDFE0 Trang ch\u1EE7", "action:menu")
+      Markup.button.callback(buttonText("week", "week"), `action:duty_week:${targetDateText}`),
+      Markup.button.callback(buttonText("chooseDate", "calendar"), "action:duty_other"),
+      Markup.button.callback(buttonText("home", "home"), "action:menu")
     ]
   ]);
 }
@@ -200,12 +211,12 @@ function dutyKeyboard(date = new Date()) {
 function dashboardKeyboard() {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback("\uD83D\uDDD3\uFE0F L\u1ECBch l\u00E0m vi\u1EC7c", "action:hermes_work_menu"),
-      Markup.button.callback("\uD83D\uDCCB L\u1ECBch tr\u1EF1c", "action:duty_menu"),
-      Markup.button.callback("\uD83C\uDFAF KPI", "action:hermes_kpi"),
+      Markup.button.callback(buttonText("workSchedule", "week"), "action:hermes_work_menu"),
+      Markup.button.callback(buttonText("duty", "clipboard"), "action:duty_menu"),
+      Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi"),
     ],
     [
-      Markup.button.callback("\uD83C\uDFE0 V\u1EC1 trang ch\u1EE7", "action:menu")
+      Markup.button.callback(buttonText("home", "home"), "action:menu")
     ]
   ]);
 }
@@ -213,14 +224,14 @@ function dashboardKeyboard() {
 function workMenuKeyboard() {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback("\u2B05\uFE0F H\u00F4m qua", "action:hermes_work_offset:-1"),
-      Markup.button.callback("\uD83D\uDCC5 H\u00F4m nay", "action:hermes_work_offset:0"),
-      Markup.button.callback("Ng\u00E0y mai \u27A1\uFE0F", "action:hermes_work_offset:1")
+      Markup.button.callback(buttonText("previousDayShort", "back"), "action:hermes_work_offset:-1"),
+      Markup.button.callback(buttonText("today", "calendar"), "action:hermes_work_offset:0"),
+      Markup.button.callback(`${TEXT.button.nextDayShort} ${ICON.next}`, "action:hermes_work_offset:1")
     ],
     [
-      Markup.button.callback("\uD83D\uDDD3\uFE0F Xem c\u1EA3 tu\u1EA7n", "action:hermes_work_week"),
-      Markup.button.callback("\uD83D\uDCC6 Ch\u1ECDn ng\u00E0y", "action:hermes_work_other"),
-      Markup.button.callback("\uD83C\uDFE0 Trang ch\u1EE7", "action:menu")
+      Markup.button.callback(buttonText("week", "week"), "action:hermes_work_week"),
+      Markup.button.callback(buttonText("chooseDate", "calendar"), "action:hermes_work_other"),
+      Markup.button.callback(buttonText("home", "home"), "action:menu")
     ]
   ]);
 }
@@ -230,14 +241,14 @@ function dutyMenuKeyboard() {
 
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback("\u2B05\uFE0F H\u00F4m qua", `action:duty_date:${today}:-1`),
-      Markup.button.callback("\uD83D\uDCC5 H\u00F4m nay", "action:duty_today"),
-      Markup.button.callback("Ng\u00E0y mai \u27A1\uFE0F", `action:duty_date:${today}:1`)
+      Markup.button.callback(buttonText("previousDayShort", "back"), `action:duty_date:${today}:-1`),
+      Markup.button.callback(buttonText("today", "calendar"), "action:duty_today"),
+      Markup.button.callback(`${TEXT.button.nextDayShort} ${ICON.next}`, `action:duty_date:${today}:1`)
     ],
     [
-      Markup.button.callback("\uD83D\uDDD3\uFE0F Xem c\u1EA3 tu\u1EA7n", `action:duty_week:${today}`),
-      Markup.button.callback("\uD83D\uDCC6 Ch\u1ECDn ng\u00E0y", "action:duty_other"),
-      Markup.button.callback("\uD83C\uDFE0 Trang ch\u1EE7", "action:menu")
+      Markup.button.callback(buttonText("week", "week"), `action:duty_week:${today}`),
+      Markup.button.callback(buttonText("chooseDate", "calendar"), "action:duty_other"),
+      Markup.button.callback(buttonText("home", "home"), "action:menu")
     ]
   ]);
 }
@@ -245,11 +256,11 @@ function dutyMenuKeyboard() {
 function accountMenuKeyboard() {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback("👤 Xem thông tin", "action:hermes_current_user"),
-      Markup.button.callback("🔐 Cập nhật", "action:hermes_account"),
-      Markup.button.callback("🗑️ Xoá tài khoản", "action:delete_hermes")
+      Markup.button.callback(buttonText("currentUser", "user"), "action:hermes_current_user"),
+      Markup.button.callback(buttonText("updateAccount", "lock"), "action:hermes_account"),
+      Markup.button.callback(buttonText("deleteAccount", "delete"), "action:delete_hermes")
     ],
-    [Markup.button.callback("🏠 Về menu chính", "action:menu")]
+    [Markup.button.callback(buttonText("home", "home"), "action:menu")]
   ]);
 }
 
@@ -443,7 +454,7 @@ async function fetchDutyScheduleByDate(date = new Date()) {
 const DUTY_SHEET_URL = "https://docs.google.com/spreadsheets/d/1gWlj6NObCw0AMKBK5GW_2_mCPs6WoF73bNe7QgkGBDc/edit?gid=1110843393#gid=1110843393";
 const OT_SHEET_URL = "https://docs.google.com/spreadsheets/d/15frj-04elTgZgmVgPDmFEG6aWCxgZqy9/edit?gid=1960207408#gid=1960207408";
 
-function formatDutyHeader(result) {
+function formatDutyHeader(result, options = {}) {
   const displayDate = (() => {
     const match = String(result.targetDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match) return escapeHtml(result.targetDate || "");
@@ -452,6 +463,14 @@ function formatDutyHeader(result) {
   })();
 
   const weekday = String(result.weekday || "").trim().replace(/\s*-\s*Ca\s*\d+.*$/i, "");
+
+  if (options.weekView) {
+    return [
+      "━━━━━━━━━━━━━━━━━━━━",
+      `📅 <b>${escapeHtml(weekday).toUpperCase()} • ${displayDate}</b>`,
+      "━━━━━━━━━━━━━━━━━━━━"
+    ];
+  }
 
   return [
     "━━━━━━━━━━━━━━━━━━━━",
@@ -465,13 +484,13 @@ function formatDutyInlinePeople(values = [], options = {}) {
   const items = values.map((item) => {
     const name = String(item || "").trim();
     if (!name || name === "-") return "";
-    // Mẹo: Dùng link nội bộ để tạo màu xanh (Click vào chỉ mở lại Bot hoặc không đi đâu xa)
-    return `<a href="https://t.me/share/url?url=${encodeURIComponent(name)}">${name}</a>`;
+    const safeName = escapeHtml(name);
+    if (options.link === false) return safeName;
+    return `<a href="https://t.me/share/url?url=${encodeURIComponent(name)}">${safeName}</a>`;
   }).filter(Boolean);
   
   if (!items.length) return "-";
-  const joined = items.join(" • ");
-  return options.bold ? `<b>${joined}</b>` : joined;
+  return items.join(" • ");
 }
 
 function formatDutyAlignedLine(icon, label, value) {
@@ -575,14 +594,18 @@ function formatDutyNoteLines(note) {
   });
 }
 
-function formatHolidayDutyScheduleHtml(result) {
+function formatDutyDetailLinks() {
+  return `📋 <a href="${escapeHtml(DUTY_SHEET_URL)}">Chi tiết lịch trực</a>\n⏱️ <a href="${escapeHtml(OT_SHEET_URL)}">Chi tiết OT</a>`;
+}
+
+function formatHolidayDutyScheduleHtml(result, options = {}) {
   const lines = String(result.note || "")
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .filter((line) => line !== "-------------------");
 
-  const body = [...formatDutyHeader(result), ""];
+  const body = [...formatDutyHeader(result, { weekView: options.weekView }), ""];
   let hasNoteTitle = false;
 
   for (const line of lines) {
@@ -592,7 +615,7 @@ function formatHolidayDutyScheduleHtml(result) {
       const icon = /ca\s*1/i.test(title) ? "☀️" : /ca\s*2/i.test(title) ? "🌤️" : "🎊";
       const label = /ca\s*1/i.test(title) ? "Trực ca 1" : /ca\s*2/i.test(title) ? "Trực ca 2" : title;
       const people = String(value || "").split(/[•,]/).map(s => s.trim()).filter(Boolean);
-      body.push(formatDutyAlignedLine(icon, label, formatDutyInlinePeople(people, { bold: true })));
+      body.push(formatDutyAlignedLine(icon, label, formatDutyInlinePeople(people, { bold: true, link: options.linkPeople })));
       continue;
     }
 
@@ -603,12 +626,12 @@ function formatHolidayDutyScheduleHtml(result) {
     body.push(line.startsWith("📍") ? escapeHtml(line) : formatDutyAlignedLine("📍", line, ""));
   }
 
-  return body.concat(["", `📋 <a href="${escapeHtml(DUTY_SHEET_URL)}">Chi tiết lịch trực</a>\n⏱️ <a href="${escapeHtml(OT_SHEET_URL)}">Chi tiết OT</a>`]).join("\n");
+  return body.concat(options.includeDetailLinks === false ? [] : ["", formatDutyDetailLinks()]).join("\n");
 }
 
-function formatSundayDutyScheduleHtml(result) {
+function formatSundayDutyScheduleHtml(result, options = {}) {
   const lines = [
-    ...formatDutyHeader(result),
+    ...formatDutyHeader(result, { weekView: options.weekView }),
     ""
   ];
 
@@ -619,15 +642,15 @@ function formatSundayDutyScheduleHtml(result) {
     const label = isCa2 ? "Trực ca 2" : "Trực ca 1";
     const icon = isCa2 ? "🌤️" : "☀️";
     
-    lines.push(formatDutyAlignedLine(icon, label, formatDutyInlinePeople(shift.people, { bold: true })));
-    lines.push(formatDutyAlignedLine("📡", "Trực server", formatDutyInlinePeople(shift.server ? [shift.server] : [], { bold: true })));
+    lines.push(formatDutyAlignedLine(icon, label, formatDutyInlinePeople(shift.people, { bold: true, link: options.linkPeople })));
+    lines.push(formatDutyAlignedLine("📡", "Trực server", formatDutyInlinePeople(shift.server ? [shift.server] : [], { bold: true, link: options.linkPeople })));
     if (shift.note) {
       const noteValue = String(shift.note || "").replace(/^Server\s*:\s*/i, "").trim() || "-";
       lines.push(formatDutyAlignedLine("📝", "Ghi chú", `<i>${escapeHtml(noteValue)}</i>`));
     }
   });
 
-  return lines.join("\n") + `\n\n📋 <a href="${escapeHtml(DUTY_SHEET_URL)}">Chi tiết lịch trực</a>\n⏱️ <a href="${escapeHtml(OT_SHEET_URL)}">Chi tiết OT</a>`;
+  return lines.join("\n") + (options.includeDetailLinks === false ? "" : `\n\n${formatDutyDetailLinks()}`);
 }
 
 function getAccountDisplayName(account = {}) {
@@ -674,6 +697,9 @@ function formatDutyMatchedMentions(result, accounts = []) {
 function formatDutyScheduleHtml(result, viewerName = "", options = {}) {
   const viewerAccount = options.viewerAccount || null;
   const includePersonalSection = options.includePersonalSection !== false;
+  const includeDetailLinks = options.includeDetailLinks !== false;
+  const linkPeople = options.linkPeople !== false;
+  const weekView = Boolean(options.weekView);
   const userRoles = includePersonalSection ? findUserDutyRoles(result, viewerName) : [];
   const personalSection = userRoles.length
     ? [
@@ -699,18 +725,18 @@ function formatDutyScheduleHtml(result, viewerName = "", options = {}) {
 
   let content = "";
   if (result.isHoliday) {
-    content = formatHolidayDutyScheduleHtml(result);
+    content = formatHolidayDutyScheduleHtml(result, { includeDetailLinks, linkPeople, weekView });
   } else if (result.isSundayShift) {
-    content = formatSundayDutyScheduleHtml(result);
+    content = formatSundayDutyScheduleHtml(result, { includeDetailLinks, linkPeople, weekView });
   } else {
     const lines = [
-      ...formatDutyHeader(result),
+      ...formatDutyHeader(result, { weekView }),
       "",
-      formatDutyAlignedLine("☀️", "Trực sáng", formatDutyInlinePeople(result.morningPrimary ? [result.morningPrimary] : [], { bold: true })),
-      formatDutyAlignedLine("🏛️", "Trực hành chính", formatDutyInlinePeople(result.morningSupport, { bold: true })),
-      formatDutyAlignedLine("🍱", "Trực trưa", formatDutyInlinePeople(result.noon, { bold: true })),
-      formatDutyAlignedLine("🌤️", "Trực tối", formatDutyInlinePeople(result.dutyNight, { bold: true })),
-      formatDutyAlignedLine("📡", "Trực server", formatDutyInlinePeople(result.afterHoursServer ? [result.afterHoursServer] : [], { bold: true })),
+      formatDutyAlignedLine("☀️", "Trực sáng", formatDutyInlinePeople(result.morningPrimary ? [result.morningPrimary] : [], { bold: true, link: linkPeople })),
+      formatDutyAlignedLine("🏛️", "Trực hành chính", formatDutyInlinePeople(result.morningSupport, { bold: true, link: linkPeople })),
+      formatDutyAlignedLine("🍱", "Trực trưa", formatDutyInlinePeople(result.noon, { bold: true, link: linkPeople })),
+      formatDutyAlignedLine("🌤️", "Trực tối", formatDutyInlinePeople(result.dutyNight, { bold: true, link: linkPeople })),
+      formatDutyAlignedLine("📡", "Trực server", formatDutyInlinePeople(result.afterHoursServer ? [result.afterHoursServer] : [], { bold: true, link: linkPeople })),
     ];
 
     const noteLines = formatDutyNoteLines(result.note);
@@ -719,7 +745,7 @@ function formatDutyScheduleHtml(result, viewerName = "", options = {}) {
       lines.push(...noteLines);
     }
 
-    lines.push("", `📋 <a href="${escapeHtml(DUTY_SHEET_URL)}">Chi tiết lịch trực</a>\n⏱️ <a href="${escapeHtml(OT_SHEET_URL)}">Chi tiết OT</a>`);
+    if (includeDetailLinks) lines.push("", formatDutyDetailLinks());
     content = lines.join("\n");
   }
 
@@ -1098,12 +1124,9 @@ async function releaseInstanceLock() {
 }
 
 async function guard(ctx, next) {
-  if (!isPrivateChat(ctx)) {
-    if (ctx.callbackQuery) await ctx.answerCbQuery("Bot chỉ hoạt động trong chat private.");
-    if (ctx.reply) await ctx.reply("Bot chỉ hoạt động trong chat private. Mở chat riêng với bot nhé Sếp.");
-    return;
-  }
+  if (!isPrivateChat(ctx) && !isGroupChat(ctx)) return;
   if (isStartLikeUpdate(ctx)) return next();
+  if (isGroupChat(ctx) && isAllowedGroup(ctx)) return next();
   if (!(await isAllowedUser(ctx))) {
     if (ctx.callbackQuery) await ctx.answerCbQuery("Telegram ID này chưa được cấp quyền.");
     if (ctx.reply) await ctx.reply(buildUnauthorizedText(ctx), Markup.removeKeyboard());
@@ -1218,7 +1241,7 @@ async function showWorkSchedule(ctx, date = new Date()) {
 function kpiKeyboard(months = []) {
   const rows = [];
   const normalizedMonths = [...new Set(months)]
-    .filter((month) => /^2026_\d{2}$/.test(String(month)))
+    .filter((month) => /^\d{4}_\d{2}$/.test(String(month)))
     .sort((a, b) => a.localeCompare(b));
 
   const monthButtons = normalizedMonths.map((month) => {
@@ -1230,7 +1253,7 @@ function kpiKeyboard(months = []) {
     rows.push(monthButtons.slice(i, i + 3));
   }
 
-  const homeButton = Markup.button.callback("🏠 Về trang chủ", "action:menu");
+  const homeButton = Markup.button.callback(buttonText("homeMain", "home"), "action:menu");
   if (rows.length && rows[rows.length - 1].length < 3) {
     rows[rows.length - 1].push(homeButton);
   } else {
@@ -1467,7 +1490,12 @@ async function showDutyScheduleWeek(ctx, date = new Date()) {
   for (let offset = 0; offset < 7; offset += 1) {
     const targetDate = getRelativeWorkScheduleDate(offset, startDate);
     const result = await fetchDutyScheduleByDate(targetDate);
-    parts.push(formatDutyScheduleHtml(result, viewerName, { viewerAccount }));
+    parts.push(formatDutyScheduleHtml(result, viewerName, {
+      viewerAccount,
+      includeDetailLinks: offset === 6,
+      linkPeople: true,
+      weekView: true
+    }));
   }
   await replyFresh(ctx, parts.join("\n\n"), {
     parse_mode: "HTML",
@@ -1860,13 +1888,13 @@ bot.command("testtruc", async (ctx) => {
 
 
 bot.command("testauto", async (ctx) => {
-  await ctx.reply("? ?ang test b?n th?ng b?o t? ??ng (b? qua ki?m tra gi?)...");
+  await ctx.reply(statusText("test", TEXT.testAuto.start));
   try {
-    await notifyDutyScheduleForDate(new Date(), "Test l?nh /testauto");
+    await notifyDutyScheduleForDate(new Date(), TEXT.testAuto.reason);
     await notifyTodayDashboard();
-    await ctx.reply("? Ch?y xong h?m t? ??ng!");
+    await ctx.reply(statusText("success", TEXT.testAuto.success));
   } catch (error) {
-    await ctx.reply(`? L?i khi test t? ??ng: ${error.message}`);
+    await ctx.reply(`${statusText("error", TEXT.testAuto.failurePrefix)}: ${error.message}`);
   }
 });
 
@@ -1899,8 +1927,8 @@ bot.command("testnotify", async (ctx) => {
     }
 
     await ctx.reply([
-      "🧪 <b>TEST THÔNG BÁO HERMES</b>",
-      "Tin bên dưới là thông báo mới nhất bot đọc được từ Hermes.",
+      `${ICON.test} <b>${TEXT.testNotify.title}</b>`,
+      TEXT.testNotify.latest,
       ""
     ].join("\n"), { parse_mode: "HTML" });
     await ctx.reply(formatHermesNotificationHtml(notification), {
@@ -1908,11 +1936,15 @@ bot.command("testnotify", async (ctx) => {
       disable_web_page_preview: false,
       ...Markup.inlineKeyboard([
         [
-          ...(notification.requestOrderId ? [Markup.button.callback("👁️ View chi tiết", `action:view_request_order:${notification.requestOrderId}`)] : []),
-          Markup.button.callback("🏠 Trang chủ", "action:menu")
+          ...(notification.requestOrderId ? [Markup.button.callback(buttonText("detailView", "eye"), `action:view_request_order:${notification.requestOrderId}`)] : []),
+          Markup.button.callback(buttonText("home", "home"), "action:menu")
         ]
       ])
     });
+  } catch (error) {
+    console.error("Test Hermes notification failed:", error);
+    await ctx.reply(`${TEXT.testNotify.failurePrefix}.\n${String(error.message || error).slice(0, 700)}`);
+
   } finally {
     await deleteTempMessage(ctx, loading);
   }
@@ -2176,7 +2208,7 @@ bot.action(/^action:view_request_order:(.+)$/, async (ctx) => {
   await replyFresh(ctx, formatRequestOrderDetailHtml(detail.order, { checkedAt: detail.checkedAt }), {
     parse_mode: "HTML",
     disable_web_page_preview: true,
-    ...Markup.inlineKeyboard([[Markup.button.callback("🏠 Về trang chủ", "action:menu")]])
+    ...Markup.inlineKeyboard([[Markup.button.callback(buttonText("homeMain", "home"), "action:menu")]])
   });
 });
 bot.action(/^action:hermes_work_list:(.+)$/, async (ctx) => {
@@ -2195,6 +2227,7 @@ bot.action(/^action:hermes_work_list:(.+)$/, async (ctx) => {
 
 bot.on("text", async (ctx) => {
   const text = (ctx.message?.text || "").trim();
+
   const pending = pendingActions.get(ctx.chat.id);
   if (!pending) {
     await ctx.reply("Em chưa hiểu lệnh này. Gửi /lich hoặc /menu nhé Sếp.", keyboard());
@@ -2376,8 +2409,8 @@ async function checkHermesNotifications() {
           disable_web_page_preview: false,
           ...Markup.inlineKeyboard([
             [
-              ...(notification.requestOrderId ? [Markup.button.callback("👁️ View chi tiết", `action:view_request_order:${notification.requestOrderId}`)] : []),
-              Markup.button.callback("🏠 Trang chủ", "action:menu")
+              ...(notification.requestOrderId ? [Markup.button.callback(buttonText("detailView", "eye"), `action:view_request_order:${notification.requestOrderId}`)] : []),
+              Markup.button.callback(buttonText("home", "home"), "action:menu")
             ]
           ])
         });
@@ -2449,15 +2482,6 @@ process.once("SIGTERM", async () => {
   bot.stop("SIGTERM");
   await releaseInstanceLock();
 });
-
-
-
-
-
-
-
-
-
 
 
 

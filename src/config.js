@@ -41,6 +41,11 @@ const allowedIds = (process.env.ALLOWED_TELEGRAM_IDS || "")
   .map((item) => item.trim())
   .filter(Boolean);
 
+const allowedGroupIds = (process.env.ALLOWED_TELEGRAM_GROUP_IDS || "")
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
+
 const lat = process.env.IHR_GEO_LAT?.trim();
 const lng = process.env.IHR_GEO_LNG?.trim();
 const hasGeo = lat !== undefined && lat !== "" && lng !== undefined && lng !== "";
@@ -60,6 +65,7 @@ export const config = {
   wgTunnelName,
   wgConfPath,
   allowedIds,
+  allowedGroupIds,
   allowedIdsFile: path.resolve(process.env.ALLOWED_TELEGRAM_IDS_FILE || "data/allowed-telegram-ids.txt"),
   headless: toBoolean(process.env.HEADLESS, true),
   timeoutMs: toNumber(process.env.ACTION_TIMEOUT_MS, 45000),
@@ -96,3 +102,4 @@ export function assertBotConfig() {
     throw new Error("Missing required environment variable: BOT_SECRET_KEY");
   }
 }
+

@@ -1,9 +1,13 @@
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import path from "node:path";
+
 import { chromium } from "playwright";
 
 import { config } from "./config.js";
 
 // KPI ???c trực tiếp từ Google Sheet (không cần local API server)
 const KPI_SHEET_ID = process.env.KPI_SHEET_ID || "14mLSjz6oU6QLVWi5PeNabRFSKmhAtLB6HZnT0M7T9uo";
+const HAN_SUPPORT_EMPLOYEE_CACHE_FILE = path.resolve("data/han-support-employees.json");
 
 const USERNAME_SELECTORS = [
   "#txtuserid",
@@ -246,7 +250,7 @@ function createApiCapture(page) {
     const request = response.request();
     let body = "";
     const contentType = response.headers()["content-type"] || "";
-    if ((response.request().resourceType() !== "fetch" && contentType.includes("json")) || /\/api\/user\/(pre-login|get-otp|verify|login)/i.test(url) || /\/api\/support-online\/working-schedule\/list/i.test(url) || /\/api\/request-order\/get/i.test(url) || /\/api\/notify\/get/i.test(url)) {
+    if ((response.request().resourceType() !== "fetch" && contentType.includes("json")) || /\/api\/user\/(pre-login|get-otp|verify|login)/i.test(url) || /\/api\/support-online\/working-schedule\/list/i.test(url) || /\/api\/request-order\/get/i.test(url) || /\/api\/notify\/get/i.test(url) || /kpi-support|report-kpi-support|manage-employee|employee/i.test(url)) {
       body = await response.text().catch(() => "");
     }
     apiResponses.push({
@@ -2532,6 +2536,435 @@ export async function getHermesRoomRevenue({ username, password, storageState = 
   }
 }
 
+function flattenKpiSupportItems(value, output = []) {
+  if (!value) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) flattenKpiSupportItems(item, output);
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  const keys = Object.keys(value);
+  const hasKpiShape = keys.some((key) => /support|employee|user|dept|department|branch|room|point|kpi|total/i.test(key));
+  if (hasKpiShape) output.push(value);
+  for (const key of keys) {
+    if (/data|items|rows|list|result|records/i.test(key)) flattenKpiSupportItems(value[key], output);
+  }
+  return output;
+}
+
+function normalizeKpiSupportText(value = "") {
+  return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[_\s-]+/g, " ").trim();
+}
+
+function pickKpiSupportNumber(item = {}, patterns = []) {
+  for (const [key, value] of Object.entries(item || {})) {
+    const normalizedKey = normalizeKpiSupportText(key);
+    if (!patterns.some((pattern) => normalizedKey.includes(pattern))) continue;
+    const parsed = Number(String(value ?? "").replace(/[^0-9,.-]/g, "").replace(/,/g, ""));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function pickKpiSupportText(item = {}, patterns = []) {
+  for (const [key, value] of Object.entries(item || {})) {
+    const normalizedKey = normalizeKpiSupportText(key);
+    if (!patterns.some((pattern) => normalizedKey.includes(pattern))) continue;
+    if (value === undefined || value === null || typeof value === "object") continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function pickKpiSupportTextDeep(value = {}, patterns = [], reject = () => false) {
+  if (!value || typeof value !== "object") return "";
+  for (const [key, itemValue] of Object.entries(value)) {
+    const normalizedKey = normalizeKpiSupportText(key);
+    if (patterns.some((pattern) => normalizedKey.includes(pattern)) && itemValue !== undefined && itemValue !== null && typeof itemValue !== "object") {
+      const text = String(itemValue).trim();
+      if (text && !reject(text)) return text;
+    }
+  }
+  for (const itemValue of Object.values(value)) {
+    if (!itemValue || typeof itemValue !== "object") continue;
+    const text = pickKpiSupportTextDeep(itemValue, patterns, reject);
+    if (text) return text;
+  }
+  return "";
+}
+
+
+function isInvalidEmployeeName(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  if (isValidKpiSupporter(text)) return true;
+  if (/^'?0\d{8,11}$/.test(text.replace(/[\s.-]/g, ""))) return true;
+  if (/^[a-f0-9]{8,}$/i.test(text)) return true;
+  if (/^[\d\s+().-]+$/.test(text)) return true;
+  if (/han\s+support|hcmc\s+support|support\s+online/i.test(text)) return true;
+  return false;
+}
+
+function findKpiSupportObjectByEmail(value, email) {
+  if (!value || typeof value !== "object" || !email) return null;
+  const values = Object.values(value);
+  if (values.some((itemValue) => typeof itemValue !== "object" && String(itemValue || "").trim().toLowerCase() === String(email).toLowerCase())) {
+    return value;
+  }
+  for (const itemValue of values) {
+    const found = findKpiSupportObjectByEmail(itemValue, email);
+    if (found) return found;
+  }
+  return null;
+}
+
+function pickKpiSupportFullName(value = {}, fallbackSource = {}) {
+  const direct = pickKpiSupportTextDeep(value, [
+    "full name", "fullname", "display name", "displayname", "employee name", "employee fullname",
+    "supporter name", "support name", "staff name", "ho ten", "họ tên", "ten nhan vien", "tên nhân viên"
+  ], isInvalidEmployeeName);
+  if (direct) return direct;
+
+  const lastName = pickKpiSupportTextDeep(value, ["last name", "lastname", "ho", "họ"], isInvalidEmployeeName);
+  const middleName = pickKpiSupportTextDeep(value, ["middle name", "middlename", "ten dem", "tên đệm"], isInvalidEmployeeName);
+  const firstName = pickKpiSupportTextDeep(value, ["first name", "firstname", "given name", "ten", "tên"], isInvalidEmployeeName);
+  const composed = [lastName, middleName, firstName].filter(Boolean).join(" ").trim();
+  if (composed) return composed;
+
+  return pickKpiSupportTextDeep(fallbackSource, ["full name", "fullname", "display name", "displayname", "employee name", "supporter name", "support name"], isInvalidEmployeeName);
+}
+
+function findSupportTextFromSource(value = "") {
+  const text = String(value || "");
+  const email = text.match(/[a-z0-9._%+-]+@ipos\.vn/i)?.[0];
+  if (email) return email;
+  const parts = text.split(/[|,;\n\t]+/).map((part) => part.trim()).filter(Boolean);
+  return parts.find((part) => /support|ipos|^[a-z]+[._-][a-z]+/i.test(part) && !/han[_\s-]?support|department|dept|team|point|total|kpi/i.test(part)) || "";
+}
+
+function isValidKpiSupporter(value = "") {
+  return /@ipos\.vn$/i.test(String(value || "").trim());
+}
+
+function getSupportAlias(value = "") {
+  return String(value || "").trim().toLowerCase().replace(/@ipos\.vn$/i, "");
+}
+
+function normalizeEmployeeNameRecord(item = {}) {
+  const text = JSON.stringify(item || {});
+  const email = pickKpiSupportTextDeep(item, ["email", "mail", "username", "user name", "account", "login"]) || findSupportTextFromSource(text);
+  const name = pickKpiSupportFullName(item, item);
+  const department = pickKpiSupportTextDeep(item, ["dept", "department", "room", "branch", "phong", "phòng"]);
+  const sourceText = text;
+  return { email, alias: getSupportAlias(email), name, department, sourceText };
+}
+
+function isServiceHanSupportEmployee(item = {}) {
+  const alias = getSupportAlias(item.email || item.username || "");
+  return /^(support|otp|asm|test|hn\.partner)$/i.test(alias);
+}
+
+function normalizeHanSupportEmployeeCacheItem(item = {}) {
+  const email = String(item.email || "").trim().toLowerCase();
+  const alias = getSupportAlias(email || item.alias || "");
+  const name = String(item.name || item.fullName || item.displayName || "").trim();
+  if (!alias || !name || isInvalidEmployeeName(name)) return null;
+  return {
+    email: email || `${alias}@ipos.vn`,
+    alias,
+    name,
+    code: item.code || "",
+    department: item.deptCode || item.department || "HAN_SUPPORT",
+    teamId: item.teamId || "",
+    level: item.level || "",
+    role: item.role || "",
+    status: item.status || "",
+    updatedTime: item.updatedTime || ""
+  };
+}
+
+async function readHanSupportEmployeeCache() {
+  try {
+    const data = JSON.parse(await readFile(HAN_SUPPORT_EMPLOYEE_CACHE_FILE, "utf8"));
+    const items = Array.isArray(data.employees) ? data.employees : [];
+    return new Map(items
+      .map(normalizeHanSupportEmployeeCacheItem)
+      .filter(Boolean)
+      .map((item) => [item.alias, item.name]));
+  } catch {
+    return new Map();
+  }
+}
+
+async function writeHanSupportEmployeeCache(employees = []) {
+  const items = employees
+    .filter((item) => !isServiceHanSupportEmployee(item))
+    .map(normalizeHanSupportEmployeeCacheItem)
+    .filter(Boolean)
+    .sort((a, b) => a.alias.localeCompare(b.alias));
+  await mkdir(path.dirname(HAN_SUPPORT_EMPLOYEE_CACHE_FILE), { recursive: true });
+  await writeFile(HAN_SUPPORT_EMPLOYEE_CACHE_FILE, JSON.stringify({
+    sourceUrl: "https://hermes.ipos.vn/manage-employee",
+    apiUrl: "/api/employee/get?page={n}&deptCode=HAN_SUPPORT",
+    updatedAt: new Date().toISOString(),
+    count: items.length,
+    employees: items
+  }, null, 2), "utf8");
+  return new Map(items.map((item) => [item.alias, item.name]));
+}
+
+async function fetchHanSupportEmployeeNameMap(page) {
+  const result = await page.evaluate(async () => {
+    const token = localStorage.getItem("token") || document.cookie.match(/(?:^|; )token=([^;]+)/)?.[1] || "";
+    if (!token) return [];
+    const headers = { accept: "application/json, text/plain, */*", authorization: token, server: "LIVE" };
+    const employees = [];
+    let pageNumber = 1;
+    let totalPage = 1;
+    do {
+      const response = await fetch(`/api/employee/get?page=${pageNumber}&deptCode=HAN_SUPPORT`, { headers });
+      if (!response.ok) break;
+      const json = await response.json().catch(() => ({}));
+      const data = json.data || {};
+      employees.push(...(data.employees || []));
+      totalPage = Number(data.totalPage || 1);
+      pageNumber += 1;
+    } while (pageNumber <= totalPage && pageNumber <= 20);
+    return employees;
+  }).catch(() => []);
+  if (!Array.isArray(result) || !result.length) return new Map();
+  return writeHanSupportEmployeeCache(result).catch(() => new Map(result
+    .map(normalizeHanSupportEmployeeCacheItem)
+    .filter(Boolean)
+    .map((item) => [item.alias, item.name])));
+}
+
+function isHanSupportEmployee(item = {}) {
+  const haystack = normalizeKpiSupportText([item.department, item.sourceText].filter(Boolean).join(" "));
+  return haystack.includes("han support") || haystack.includes("han_support");
+}
+
+async function readHanSupportEmployeeNameMap(page, apiResponses = []) {
+  const employeeUrl = "https://hermes.ipos.vn/manage-employee";
+  await page.goto(employeeUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(5000);
+
+  const fetchedNameMap = await fetchHanSupportEmployeeNameMap(page);
+  if (fetchedNameMap.size) return fetchedNameMap;
+
+  const apiItems = [];
+  for (const response of apiResponses || []) {
+    if (!/manage-employee|employee/i.test(response.url || "") || !response.body) continue;
+    try {
+      flattenKpiSupportItems(JSON.parse(response.body), apiItems);
+    } catch {}
+  }
+
+  const apiRecords = apiItems.map(normalizeEmployeeNameRecord).filter((item) => item.alias && item.name && !isInvalidEmployeeName(item.name)).filter(isHanSupportEmployee);
+  const domRows = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll("table tr, .mat-row, [role='row']"));
+    return rows.map((row) => Array.from(row.querySelectorAll("th,td,.mat-cell,.mat-header-cell,[role='cell'],[role='columnheader']")).map((cell) => cell.textContent.trim()).filter(Boolean)).filter((cells) => cells.length);
+  }).catch(() => []);
+  const headerRow = domRows.find((cells) => cells.some((cell) => /email|mail|nhân viên|nhan vien|họ tên|ho ten|phòng|phong|department/i.test(cell))) || [];
+  const findDomIndex = (...patterns) => headerRow.findIndex((cell) => {
+    const normalizedCell = normalizeKpiSupportText(cell);
+    return patterns.some((pattern) => normalizedCell.includes(pattern));
+  });
+  const emailIndex = findDomIndex("email", "mail", "account", "user");
+  const nameIndex = findDomIndex("ho ten", "họ tên", "nhan vien", "employee", "name", "ten");
+  const departmentIndex = findDomIndex("phong", "dept", "department", "room", "branch");
+  const domRecords = domRows.filter((cells) => cells !== headerRow).map((cells) => {
+    const sourceText = cells.join(" | ");
+    const email = (emailIndex >= 0 ? cells[emailIndex] : "") || findSupportTextFromSource(sourceText);
+    const name = (nameIndex >= 0 ? cells[nameIndex] : "") || cells.find((cell) => !isInvalidEmployeeName(cell) && !/@ipos\.vn/i.test(cell) && !/han\s+support|hcmc\s+support|active|inactive/i.test(cell)) || "";
+    const department = (departmentIndex >= 0 ? cells[departmentIndex] : "") || "";
+    return { email, alias: getSupportAlias(email), name, department, sourceText };
+  }).filter((item) => item.alias && item.name && !isInvalidEmployeeName(item.name)).filter(isHanSupportEmployee);
+
+  const nameMap = await readHanSupportEmployeeCache();
+  for (const item of [...apiRecords, ...domRecords]) {
+    nameMap.set(item.alias, item.name);
+  }
+  return nameMap;
+}
+
+function normalizeKpiSupportItem(item = {}) {
+  const text = JSON.stringify(item || {});
+  const support = pickKpiSupportTextDeep(item, ["email", "mail", "username", "user name", "supporter email", "support email"]) || findSupportTextFromSource(text);
+  const supportObject = findKpiSupportObjectByEmail(item, support);
+  const supportName = pickKpiSupportFullName(supportObject || item, item);
+  return {
+    raw: item,
+    support,
+    supportName,
+    level: pickKpiSupportText(item, ["level", "rank", "position level"]),
+    team: pickKpiSupportText(item, ["team", "group", "support team"]),
+    department: pickKpiSupportText(item, ["dept", "department", "room", "branch", "phong", "phòng"]),
+    pointKpi: pickKpiSupportNumber(item, ["point kpi", "kpi point", "pointkpi", "point"]),
+    pointSupport: pickKpiSupportNumber(item, ["point support", "support point", "pointsupport"]),
+    pointTotal: pickKpiSupportNumber(item, ["total point", "point total", "tong point", "point salary", "pointsalary", "point"]),
+    kpi: pickKpiSupportNumber(item, ["kpi"]),
+    sourceText: text
+  };
+}
+
+function isHanSupportKpiItem(item = {}) {
+  const department = normalizeKpiSupportText(item.department || "");
+  if (department) return department.includes("han support");
+  const haystack = normalizeKpiSupportText(item.sourceText || "");
+  return haystack.includes("han support") || haystack.includes("han_support");
+}
+
+function parseKpiSupportNumber(value) {
+  const parsed = Number(String(value ?? "").replace(/[^0-9,.-]/g, "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function applyKpiSupportMonthFilter(page, month = null) {
+  if (!/^\d{4}_\d{2}$/.test(String(month || ""))) return "";
+  const [year, monthNumber] = String(month).split("_");
+  const monthLabel = `${Number(monthNumber)}/${year}`;
+  await page.getByText("Lọc").first().click().catch(() => {});
+  await page.waitForTimeout(500);
+  const input = page.locator("input").first();
+  if (await input.isVisible().catch(() => false)) {
+    await input.fill(monthLabel).catch(async () => {
+      await input.click().catch(() => {});
+      await page.keyboard.press("Control+A").catch(() => {});
+      await page.keyboard.type(monthLabel).catch(() => {});
+    });
+    await page.keyboard.press("Enter").catch(() => {});
+  }
+  await page.getByRole("button", { name: /lọc|filter|áp dụng|apply/i }).last().click().catch(() => {});
+  await page.waitForTimeout(3000);
+  return monthLabel;
+}
+
+async function readKpiSupportRealtimeFromPage(page, apiResponses, month = null) {
+  const url = "https://hermes.ipos.vn/report-kpi-support";
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(5000);
+  const monthLabel = await applyKpiSupportMonthFilter(page, month);
+
+  const isLoginPage = page.url().includes("/login") || await page.locator("input[type='password']").isVisible().catch(() => false);
+  if (isLoginPage || await hasVisibleOtpInput(page) || !(await isLoggedIn(page))) {
+    return { ok: false, sessionExpired: true, message: "Phiên Hermes đã hết hạn hoặc cần đăng nhập lại để lấy KPI realtime." };
+  }
+
+  const apiItems = [];
+  for (const response of apiResponses || []) {
+    if (!/kpi-support|report-kpi-support/i.test(response.url || "") || !response.body) continue;
+    try {
+      flattenKpiSupportItems(JSON.parse(response.body), apiItems);
+    } catch {}
+  }
+
+  const domRows = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll("table tr, .mat-row, [role='row']"));
+    return rows.map((row) => Array.from(row.querySelectorAll("th,td,.mat-cell,.mat-header-cell,[role='cell'],[role='columnheader']")).map((cell) => cell.textContent.trim()).filter(Boolean)).filter((cells) => cells.length);
+  }).catch(() => []);
+
+  const normalizedApiItems = apiItems
+    .map(normalizeKpiSupportItem)
+    .filter((item) => isValidKpiSupporter(item.support))
+    .filter(isHanSupportKpiItem);
+  const headerRow = domRows.find((cells) => cells.some((cell) => /support|nhân viên|nhan vien|level|team|phòng|phong|point|kpi/i.test(cell))) || [];
+  const findDomIndex = (...patterns) => headerRow.findIndex((cell) => {
+    const normalizedCell = normalizeKpiSupportText(cell);
+    return patterns.some((pattern) => normalizedCell.includes(pattern));
+  });
+  const supportIndex = findDomIndex("support", "user", "email", "mail", "account", "login");
+  const nameIndex = findDomIndex("ho ten", "họ tên", "nhan vien", "nhân viên", "employee name", "full name", "fullname", "display name", "ten nhan vien", "tên nhân viên");
+  const levelIndex = findDomIndex("level", "rank", "cap bac");
+  const teamIndex = findDomIndex("team", "nhom", "group");
+  const departmentIndex = findDomIndex("phong", "dept", "department", "room", "branch");
+  const basePointIndex = findDomIndex("diem goc", "điểm gốc", "base point", "point goc");
+  const bonusPointIndex = findDomIndex("diem thuong", "điểm thưởng", "bonus point", "point thuong");
+  const totalPointIndex = findDomIndex("tong diem", "tổng điểm", "total point", "tong point");
+  const domItems = domRows.filter((cells) => cells !== headerRow).map((cells) => {
+    const looksLikeHermesKpiRow = cells.length >= 7 && /@ipos\.vn/i.test(cells[0] || "");
+    const support = (looksLikeHermesKpiRow ? cells[0] : "") || (supportIndex >= 0 ? cells[supportIndex] : "") || findSupportTextFromSource(cells.join(" | ")) || cells.find((cell) => /@ipos\.vn|support|^[a-z]+[._-][a-z]+/i.test(cell) && !/han[_\s-]?support|point|total|kpi/i.test(cell)) || "---";
+    const supportName = nameIndex >= 0 && cells[nameIndex] !== support && !isInvalidEmployeeName(cells[nameIndex]) ? cells[nameIndex] : "";
+    const numbers = cells.map(parseKpiSupportNumber).filter((number) => Number.isFinite(number) && number !== 0);
+    const pointKpi = looksLikeHermesKpiRow ? parseKpiSupportNumber(cells[4]) : (basePointIndex >= 0 ? parseKpiSupportNumber(cells[basePointIndex]) : (numbers.at(-3) || numbers.at(-1) || 0));
+    const pointSupport = looksLikeHermesKpiRow ? parseKpiSupportNumber(cells[5]) : (bonusPointIndex >= 0 ? parseKpiSupportNumber(cells[bonusPointIndex]) : (numbers.at(-2) || 0));
+    const pointTotal = looksLikeHermesKpiRow ? parseKpiSupportNumber(cells[6]) : (totalPointIndex >= 0 ? parseKpiSupportNumber(cells[totalPointIndex]) : (numbers.at(-1) || pointKpi + pointSupport));
+    return {
+      support,
+      supportName,
+      level: (looksLikeHermesKpiRow ? cells[1] : "") || (levelIndex >= 0 ? cells[levelIndex] : "") || "",
+      team: (looksLikeHermesKpiRow ? cells[2] : "") || (teamIndex >= 0 ? cells[teamIndex] : "") || "",
+      department: (looksLikeHermesKpiRow ? cells[3] : "") || (departmentIndex >= 0 ? cells[departmentIndex] : "") || "HAN_SUPPORT",
+      pointKpi,
+      pointSupport,
+      pointTotal,
+      kpi: pointTotal,
+      sourceText: cells.join(" | ")
+    };
+  }).filter(isHanSupportKpiItem)
+    .filter((item) => isValidKpiSupporter(item.support))
+    .filter((item) => normalizeKpiSupportText(item.support) !== "tong cong");
+
+  const employeeNameByAlias = await readHanSupportEmployeeNameMap(page, apiResponses).catch(() => new Map());
+  const apiNameByEmail = new Map(normalizedApiItems
+    .filter((item) => item.supportName)
+    .map((item) => [String(item.support || "").toLowerCase(), item.supportName]));
+  const apiNameByAlias = new Map(normalizedApiItems
+    .filter((item) => item.supportName)
+    .map((item) => [getSupportAlias(item.support), item.supportName]));
+  const applySupportName = (item) => ({
+    ...item,
+    supportName: item.supportName
+      || employeeNameByAlias.get(getSupportAlias(item.support))
+      || apiNameByEmail.get(String(item.support || "").toLowerCase())
+      || apiNameByAlias.get(getSupportAlias(item.support))
+      || ""
+  });
+  const items = domItems.length
+    ? domItems.map(applySupportName)
+    : normalizedApiItems.map(applySupportName);
+  const totals = items.reduce((sum, item) => ({
+    pointKpi: sum.pointKpi + Number(item.pointKpi || 0),
+    pointSupport: sum.pointSupport + Number(item.pointSupport || 0),
+    pointTotal: sum.pointTotal + Number(item.pointTotal || item.pointKpi || 0),
+    kpi: sum.kpi + Number(item.kpi || 0)
+  }), { pointKpi: 0, pointSupport: 0, pointTotal: 0, kpi: 0 });
+
+  if (!items.length) {
+    return { ok: false, message: "Không tìm thấy dữ liệu KPI realtime của phòng HAN support." };
+  }
+  return { ok: true, room: "HAN_SUPPORT", url, month, monthLabel, checkedAt: new Date(), items, totals };
+}
+
+export async function getHermesKpiSupportRealtime({ username, password, storageState = null, month = null }) {
+  let session = null;
+  let login = null;
+  try {
+    if (storageState) {
+      session = await createHermesBrowserContext(storageState);
+      const result = await readKpiSupportRealtimeFromPage(session.page, session.apiResponses, month);
+      if (result.ok || !result.sessionExpired) return { ...result, storageState: await session.context.storageState().catch(() => storageState) };
+      await session.browser.close().catch(() => {});
+      session = null;
+    }
+
+    login = await loginHermesPage({ username, password, purpose: "kpi_support_realtime" });
+    if (!login.ok) {
+      return { ...login, sessionExpired: Boolean(storageState) || login.otpRequired, message: login.message || "Không thể đăng nhập Hermes để lấy KPI realtime." };
+    }
+    const result = await readKpiSupportRealtimeFromPage(login.page, login.apiResponses, month);
+    return { ...result, storageState: await login.context.storageState().catch(() => null) };
+  } catch (error) {
+    return { ok: false, message: `Lỗi lấy KPI realtime: ${error.message}` };
+  } finally {
+    if (session) await session.browser.close().catch(() => {});
+    if (login?.browser && (!activeHermesSession || activeHermesSession.browser !== login.browser)) {
+      await login.browser.close().catch(() => {});
+    }
+  }
+}
+
 export async function validateStoredSession(storageState) {
   const session = await createHermesBrowserContext(storageState);
   try {
@@ -2696,7 +3129,3 @@ export async function getHermesNotifications({ username, password, storageState 
     await login.browser.close().catch(() => {});
   }
 }
-
-
-
-

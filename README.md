@@ -229,6 +229,7 @@ pm2 save
 - `/truc`: lich truc hom nay.
 - `/truc mai`: lich truc ngay mai.
 - `/kpi`: KPI thang/nam.
+- `/pointkpi`: Bang Vang KPI Ha Noi realtime, hien thi tong diem, ngay xem, thoi gian xem va bang xep hang phong Ha Noi.
 - `/sethermes`: luu/cap nhat tai khoan Hermes.
 - `/deletehermes`: xoa tai khoan Hermes.
 - `/id`: xem Telegram ID.
@@ -270,6 +271,7 @@ Noi dung gom:
 - Lich truc.
 - Lich lam viec Hermes.
 - KPI/doanh thu neu co tai khoan Hermes hop le.
+- Bang Vang KPI Ha Noi realtime tu Hermes neu co tai khoan Hermes hop le.
 
 ## 14. Thong Bao Hermes Moi
 

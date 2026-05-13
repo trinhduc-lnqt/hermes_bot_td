@@ -16,6 +16,7 @@ import {
   getScheduleShiftLabel,
   getWeekRange,
   getWorkScheduleByDay,
+  getHermesKpiSupportRealtime,
   getKpiSummary,
   getHermesRoomRevenue,
   getHermesNotifications,
@@ -66,6 +67,7 @@ const telegramCommands = [
   { command: "lich", description: "Xem lịch làm việc" },
   { command: "truc", description: "Xem lịch trực từ Google Sheet" },
   { command: "kpi", description: "Xem KPI tháng và năm" },
+  { command: "pointkpi", description: "Mở Bảng Vàng KPI Hà Nội" },
   { command: "sethermes", description: "Lưu tài khoản Hermes" },
   { command: "deletehermes", description: "Xóa tài khoản Hermes" },
   { command: "id", description: "Xem Telegram ID" },
@@ -163,8 +165,8 @@ async function isAllowedUser(ctx) {
 function keyboard() {
   return Markup.inlineKeyboard([
     [Markup.button.callback(buttonText("dashboard", "menu"), "action:today_dashboard"), Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi")],
-    [Markup.button.callback(buttonText("workSchedule", "calendar"), "action:hermes_work_menu"), Markup.button.callback(buttonText("duty", "clipboard"), "action:duty_menu")],
-    [Markup.button.callback(buttonText("account", "user"), "action:hermes_account_menu")]
+    [Markup.button.callback(buttonText("kpiHaNoiProMax", "leaderboard"), "action:hermes_point_kpi"), Markup.button.callback(buttonText("workSchedule", "calendar"), "action:hermes_work_menu")],
+    [Markup.button.callback(buttonText("duty", "clipboard"), "action:duty_menu"), Markup.button.callback(buttonText("account", "user"), "action:hermes_account_menu")]
   ]);
 }
 
@@ -266,6 +268,7 @@ function dashboardKeyboard() {
       Markup.button.callback(buttonText("duty", "clipboard"), "action:duty_menu"),
       Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi"),
     ],
+    [Markup.button.callback(buttonText("kpiHaNoiProMax", "leaderboard"), "action:hermes_point_kpi")],
     [
       Markup.button.callback(buttonText("home", "home"), "action:menu")
     ]
@@ -318,6 +321,20 @@ function accountMenuKeyboard() {
 function formatDateTime(date) {
   return new Intl.DateTimeFormat("vi-VN", {
     dateStyle: "short",
+    timeStyle: "medium",
+    timeZone: config.timezoneId
+  }).format(date);
+}
+
+function formatViewDate(date) {
+  return new Intl.DateTimeFormat("vi-VN", {
+    dateStyle: "short",
+    timeZone: config.timezoneId
+  }).format(date);
+}
+
+function formatViewTime(date) {
+  return new Intl.DateTimeFormat("vi-VN", {
     timeStyle: "medium",
     timeZone: config.timezoneId
   }).format(date);
@@ -518,14 +535,14 @@ function formatDutyHeader(result, options = {}) {
   if (options.weekView) {
     return [
       "━━━━━━━━━━━━━━━━━━━━",
-      `📅 <b>${escapeHtml(weekday).toUpperCase()} • ${displayDate}</b>`,
+      `${ICON.calendar} <b>${escapeHtml(weekday).toUpperCase()} • ${displayDate}</b>`,
       "━━━━━━━━━━━━━━━━━━━━"
     ];
   }
 
   return [
     "━━━━━━━━━━━━━━━━━━━━",
-    `📋 <b>Lịch trực ${displayDate}</b>`,
+    `${ICON.clipboard} <b>Lịch trực ${displayDate}</b>`,
     `🗓️ <b>${escapeHtml(weekday).toUpperCase()}</b>`,
     "━━━━━━━━━━━━━━━━━━━━"
   ];
@@ -959,7 +976,7 @@ function homeText(telegramId) {
     "• <b>Tổng hợp</b>: xem nhanh lịch trực, lịch Hermes và KPI hôm nay.",
     "• <b>Lịch làm việc</b>: xem lịch ngày, tuần, mở nhanh phiếu Hermes bằng mã <code>#phiếu</code>.",
     "• <b>Lịch trực</b>: xem trực ngày/tuần và nhận nhắc lịch trực tự động.",
-    "• <b>KPI</b>: xem KPI từng tháng năm 2026, point, doanh thu phòng và tạm tính phân bổ cá nhân.",
+    "• <b>KPI</b>: xem KPI từng tháng năm 2026, point, doanh thu phòng, tạm tính phân bổ cá nhân và Bảng Vàng KPI Hà Nội realtime.",
     "• <b>Thông báo Hermes</b>: tự báo khi có thông báo mới hoặc phiếu yêu cầu đổi trạng thái, không báo trùng.",
     "",
     "⌨️ <b>LỆNH NHANH</b>",
@@ -970,6 +987,7 @@ function homeText(telegramId) {
     "• <code>/truc</code> - Xem lịch trực hôm nay",
     "• <code>/truc mai</code> - Xem lịch trực ngày mai",
     "• <code>/kpi</code> - Mở menu KPI theo tháng",
+    "• <code>/pointkpi</code> - Mở Bảng Vàng KPI Hà Nội realtime",
     "• <code>/sethermes</code> - Lưu hoặc đổi tài khoản Hermes",
     "• <code>/deletehermes</code> - Xóa tài khoản Hermes đã lưu",
     "• <code>/id</code> - Xem Telegram ID",
@@ -1120,7 +1138,7 @@ async function buildDutyScheduleReminderText(date, reasonLabel) {
   return [
     "🔔 <b>NHẮC LỊCH TRỰC</b>",
     `⏰ <b>Mốc nhắc:</b> ${escapeHtml(reasonLabel)}`,
-    `📅 <b>Ngày trực:</b> <code>${escapeHtml(dateLabel)}</code>`,
+    `${ICON.calendar} <b>Ngày trực:</b> <code>${escapeHtml(dateLabel)}</code>`,
     "━━━━━━━━━━━━━━━━━━━━",
     ...mentionSection,
     formatDutyScheduleHtml(result, "")
@@ -1349,13 +1367,14 @@ function kpiKeyboard(months = []) {
 
   const monthButtons = normalizedMonths.map((month) => {
     const [year, monthNumber] = String(month).split("_");
-    return Markup.button.callback(`📊 ${monthNumber}/${year}`, `action:hermes_kpi_month:${month}`);
+    return Markup.button.callback(`${ICON.total} ${monthNumber}/${year}`, `action:hermes_kpi_month:${month}`);
   });
 
   for (let i = 0; i < monthButtons.length; i += 3) {
     rows.push(monthButtons.slice(i, i + 3));
   }
 
+  rows.push([Markup.button.callback(buttonText("kpiLeaderBoardHaNoi", "leaderboard"), "action:hermes_point_kpi")]);
   const homeButton = Markup.button.callback(buttonText("homeMain", "home"), "action:menu");
   if (rows.length && rows[rows.length - 1].length < 3) {
     rows[rows.length - 1].push(homeButton);
@@ -1379,13 +1398,13 @@ function formatKpiBar(label, ratio) {
   const empty = "▱".repeat(totalSteps - activeSteps);
   const bar = `${filled}${empty}`;
   
-  let icon = "🟢";
+  let icon = ICON.good;
   if (percent < 80) {
-    icon = "🔴";
+    icon = ICON.poor;
   } else if (percent < 100) {
-    icon = "🟡";
+    icon = ICON.warning;
   } else if (percent >= 110) {
-    icon = "💎"; // Bonus icon for high performance
+    icon = ICON.point;
   }
 
   const dummyLink = "https://t.me/hermes_kpi";
@@ -1409,6 +1428,50 @@ function parseMoneyValue(value) {
 
 function formatMoneyValue(value) {
   return Math.round(Number(value || 0)).toLocaleString("en-US") + " đ";
+}
+
+function formatSupportDisplayName(value = "") {
+  const raw = String(value || "").trim();
+  return raw ? raw.replace(/@ipos\.vn$/i, "") : "---";
+}
+
+function formatSupportRoom(value = "") {
+  return String(value || "").trim().toUpperCase() === "HAN_SUPPORT" ? "Hà Nội" : (value || "---");
+}
+
+function formatPointKpiRealtimeHtml(result = {}) {
+  const totals = result.totals || {};
+  const checkedAt = result.checkedAt ? new Date(result.checkedAt) : new Date();
+  const items = [...(result.items || [])].sort((a, b) => Number(b.pointTotal || b.pointKpi || b.kpi || 0) - Number(a.pointTotal || a.pointKpi || a.kpi || 0));
+  const tableRows = [
+    `${padRight("Nhân viên", 30)} ${padRight("Lvl", 3)} ${padRight("Team", 12)} ${padRight("Phòng", 11)} ${padLeft("Gốc", 7)} ${padLeft("Thưởng", 7)} ${padLeft("Tổng", 7)}`,
+    `${"-".repeat(30)} ${"-".repeat(3)} ${"-".repeat(12)} ${"-".repeat(11)} ${"-".repeat(7)} ${"-".repeat(7)} ${"-".repeat(7)}`,
+    ...items.map((item) => {
+      const support = item.supportName ? String(item.supportName) : formatSupportDisplayName(item.support);
+      const level = item.level || "---";
+      const team = item.team || "---";
+      const room = formatSupportRoom(item.department || result.room || "HAN_SUPPORT");
+      const basePoint = formatMetricValue(item.pointKpi || 0, 1);
+      const bonusPoint = formatMetricValue(item.pointSupport || 0, 1);
+      const totalPoint = formatMetricValue(item.pointTotal || item.kpi || 0, 1);
+      return `${padRight(support, 30)} ${padRight(level, 3)} ${padRight(team, 12)} ${padRight(room, 11)} ${padLeft(basePoint, 7)} ${padLeft(bonusPoint, 7)} ${padLeft(totalPoint, 7)}`;
+    })
+  ];
+  return [
+    `${ICON.realtime} <b>POINT KPI REALTIME</b>`,
+    "━━━━━━━━━━━━━━━━━━━━",
+    `${ICON.room} <b>Phòng:</b> <code>Hà Nội</code>`,
+    result.monthLabel ? `${ICON.week} <b>Tháng:</b> <code>${escapeHtml(result.monthLabel)}</code>` : "",
+    `${ICON.calendar} <b>Ngày xem:</b> ${escapeHtml(formatViewDate(checkedAt))}`,
+    `${ICON.time} <b>Thời gian xem:</b> ${escapeHtml(formatViewTime(checkedAt))}`,
+    "",
+    `${ICON.point} <b>Tổng điểm:</b> ${formatMetricValue(totals.pointTotal || totals.pointKpi || totals.kpi || 0, 2)}`,
+    `${ICON.total} <b>Số dòng Hà Nội:</b> ${items.length}`,
+    "",
+    "<b>Bảng xếp hạng:</b>",
+    `<pre>${escapeHtml(tableRows.join("\n"))}</pre>`,
+    "━━━━━━━━━━━━━━━━━━━━"
+  ].filter(Boolean).join("\n");
 }
 
 function padRight(value, width) {
@@ -1473,12 +1536,12 @@ function formatKpiMonthTelegramHtml(monthData, item) {
   const roomRevenueValue = parseMoneyValue(item.roomRevenue);
   const personalRevenue = roomRevenueValue * allocationFactor * personalRatio;
   return [
-    "💎 <b>BÁO CÁO HIỆU SUẤT - KPI</b>",
-    `📅 <b>Giai đoạn:</b> <code>THÁNG ${monthLabel}</code>`,
+    `${ICON.point} <b>BÁO CÁO HIỆU SUẤT - KPI</b>`,
+    `${ICON.calendar} <b>Giai đoạn:</b> <code>THÁNG ${monthLabel}</code>`,
     "━━━━━━━━━━━━━━━━━━━━",
     `👤 <b>Hội viên:</b> <code>${escapeHtml(item.support)}</code>`,
     "",
-    "📊 <b>BẢNG TỔNG HỢP HIỆU SUẤT</b>",
+    `${ICON.total} <b>BẢNG TỔNG HỢP HIỆU SUẤT</b>`,
     formatKpiBar("HOTLINE", item.hotlinePct),
     "",
     formatKpiBar("TRIỂN KHAI", item.deployPct),
@@ -1565,6 +1628,51 @@ async function showKpiMonth(ctx, month) {
   }
 }
 
+function parseKpiMonthInput(text = "") {
+  const raw = String(text || "").trim();
+  const full = raw.match(/\b(20\d{2})[_/-](0?[1-9]|1[0-2])\b/);
+  if (full) return `${full[1]}_${String(Number(full[2])).padStart(2, "0")}`;
+  const short = raw.match(/\b(0?[1-9]|1[0-2])[_/-](20\d{2})\b/);
+  if (short) return `${short[2]}_${String(Number(short[1])).padStart(2, "0")}`;
+  return "";
+}
+
+async function showPointKpiRealtime(ctx, month = null) {
+  const monthText = month ? ` ${String(month).replace("_", "/")}` : "";
+  const loadingMessageId = await sendTempMessage(ctx, `${ICON.leaderboard} Đang mở Bảng Vàng KPI Hà Nội${monthText}...`);
+  try {
+    const account = await getHermesAccountOrReply(ctx);
+    if (!account) return;
+    const result = await enqueue(() => getHermesKpiSupportRealtime({
+      username: account.hermesUsername,
+      password: account.hermesPassword,
+      storageState: account.hermesSession,
+      month
+    }));
+    if (result.storageState) {
+      await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
+    }
+    if (!result?.ok) {
+      await replyFresh(ctx, `Không tải được Bảng Vàng KPI Hà Nội.\n${String(result?.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
+      return;
+    }
+    await replyFresh(ctx, formatPointKpiRealtimeHtml(result), {
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback(buttonText("refreshLeaderBoard", "refresh"), "action:hermes_point_kpi"),
+          Markup.button.callback(buttonText("thisMonth", "calendar"), `action:hermes_point_kpi_month:${new Date().getFullYear()}_${String(new Date().getMonth() + 1).padStart(2, "0")}`),
+          Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi")
+        ],
+        [Markup.button.callback(buttonText("home", "home"), "action:menu")]
+      ])
+    });
+  } finally {
+    await deleteTempMessage(ctx, loadingMessageId);
+  }
+}
+
 async function showDutySchedule(ctx, date = new Date()) {
   try {
     const result = await fetchDutyScheduleByDate(date);
@@ -1616,7 +1724,7 @@ async function showTodayDashboard(ctx) {
 
   const sections = [
     "🚀 <b>DASHBOARD TỔNG HỢP HÔM NAY</b>",
-    `📅 Ngày: <code>${new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date)}</code>`,
+    `${ICON.calendar} Ngày: <code>${new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date)}</code>`,
     "━━━━━━━━━━━━━━━━━━━━",
     ""
   ];
@@ -1708,7 +1816,7 @@ async function buildTodayDashboardTextForChat(chatId, from = {}) {
 
   const sections = [
     "🚀 <b>DASHBOARD TỔNG HỢP HÔM NAY</b>",
-    `📅 Ngày: <code>${new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date)}</code>`,
+    `${ICON.calendar} Ngày: <code>${new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date)}</code>`,
     "━━━━━━━━━━━━━━━━━━━━",
     ""
   ];
@@ -1952,6 +2060,10 @@ bot.command("kpi", async (ctx) => {
   await showKpiSummary(ctx);
 });
 
+bot.command(["pointkpi", "kpipoint"], async (ctx) => {
+  await showPointKpiRealtime(ctx, parseKpiMonthInput(ctx.message?.text || "") || null);
+});
+
 bot.command("testtruc", async (ctx) => {
   const text = String(ctx.message?.text || "").toLowerCase();
   const isTomorrow = /mai|tomorrow|17/.test(text);
@@ -1967,7 +2079,7 @@ bot.command("testtruc", async (ctx) => {
     const textMessage = [
       "🔔 <b>TEST NHẮC LỊCH TRỰC</b>",
       "⏰ <b>Mốc nhắc:</b> " + escapeHtml(reasonLabel),
-      "📅 <b>Ngày trực:</b> <code>" + escapeHtml(dateLabel) + "</code>",
+      "${ICON.calendar} <b>Ngày trực:</b> <code>" + escapeHtml(dateLabel) + "</code>",
       "━━━━━━━━━━━━━━━━━━━━",
       formatDutyScheduleHtml(result, "", { includePersonalSection: false }),
       "━━━━━━━━━━━━━━━━━━━━",
@@ -2163,6 +2275,17 @@ bot.action(/^action:hermes_kpi_month:(\d{4}_\d{2})$/, async (ctx) => {
   const month = ctx.match?.[1];
   await ctx.answerCbQuery();
   await showKpiMonth(ctx, month);
+});
+
+bot.action("action:hermes_point_kpi", async (ctx) => {
+  await ctx.answerCbQuery("Đang mở Bảng Vàng KPI Hà Nội...");
+  await showPointKpiRealtime(ctx);
+});
+
+bot.action(/^action:hermes_point_kpi_month:(\d{4}_\d{2})$/, async (ctx) => {
+  const month = ctx.match?.[1];
+  await ctx.answerCbQuery("Đang mở Bảng Vàng KPI theo tháng...");
+  await showPointKpiRealtime(ctx, month);
 });
 
 bot.action("action:hermes_work_other", async (ctx) => {
@@ -2461,7 +2584,7 @@ function formatHermesNotificationHtml(notification = {}) {
     "━━━━━━━━━━━━━━━━━━━━",
     `📌 <b>Nội dung:</b> ${escapeHtml(title)}`,
     `🎫 <b>Phiếu yêu cầu:</b> ${ticketDisplay}`,
-    `🔄 <b>Trạng thái:</b> ${escapeHtml(status)}`,
+    `${ICON.refresh} <b>Trạng thái:</b> ${escapeHtml(status)}`,
     message ? `📝 <b>Chi tiết:</b>\n${escapeHtml(message).slice(0, 1200)}` : "",
     "━━━━━━━━━━━━━━━━━━━━",
     "Anh bấm nút bên dưới để xem chi tiết phiếu yêu cầu."
@@ -2590,6 +2713,8 @@ process.once("SIGTERM", async () => {
   bot.stop("SIGTERM");
   await releaseInstanceLock();
 });
+
+
 
 
 

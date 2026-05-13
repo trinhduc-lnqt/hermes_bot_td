@@ -1,4 +1,4 @@
-import net from "node:net";
+﻿import net from "node:net";
 import { Markup, Telegraf } from "telegraf";
 
 import { getAllowedTelegramIds, isAuthorizedTelegramId } from "./access.js";
@@ -52,7 +52,12 @@ const startedAt = new Date();
 let instanceLockServer = null;
 let queue = Promise.resolve();
 const sentDutyReminderKeys = new Set();
+const pendingDutyReminderDeliveries = new Map();
 const sentDashboardReminderKeys = new Set();
+const cronJobs = [];
+const dutyScheduleCronTimeZone = "Asia/Bangkok";
+const dutyScheduleCronHours = new Set([7, 11, 17]);
+let hermesNotificationCheckRunning = false;
 let notifiedGithubVersion = null;
 
 const telegramCommands = [
@@ -71,6 +76,49 @@ function enqueue(task) {
   const run = queue.then(task, task);
   queue = run.catch(() => {});
   return run;
+}
+
+function getLocalDateTimeParts(now = new Date(), timeZone = config.timezoneId) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(now).reduce((acc, part) => {
+    if (part.type !== "literal") acc[part.type] = part.value;
+    return acc;
+  }, {});
+}
+
+function startCronJob({ name, everyMs, task, immediate = true }) {
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await task();
+    } catch (error) {
+      console.error(`[Cron:${name}] failed:`, error);
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => tick().catch(console.error), everyMs);
+  cronJobs.push(timer);
+  if (immediate) tick().catch(console.error);
+  return timer;
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function isPrivateChat(ctx) {
@@ -1061,7 +1109,7 @@ async function checkGithubUpdateNotification() {
   }
 }
 
-async function notifyDutyScheduleForDate(date, reasonLabel) {
+async function buildDutyScheduleReminderText(date, reasonLabel) {
   const result = await fetchDutyScheduleByDate(date);
   const accounts = await getAllHermesAccounts({ secret: config.botSecretKey });
   const mentionLines = formatDutyMatchedMentions(result, accounts);
@@ -1069,7 +1117,7 @@ async function notifyDutyScheduleForDate(date, reasonLabel) {
     ? ["✅ <b>BẠN CÓ LỊCH TRỰC</b>", ...mentionLines, "━━━━━━━━━━━━━━━━━━━━"]
     : [];
   const dateLabel = new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date);
-  const text = [
+  return [
     "🔔 <b>NHẮC LỊCH TRỰC</b>",
     `⏰ <b>Mốc nhắc:</b> ${escapeHtml(reasonLabel)}`,
     `📅 <b>Ngày trực:</b> <code>${escapeHtml(dateLabel)}</code>`,
@@ -1077,25 +1125,42 @@ async function notifyDutyScheduleForDate(date, reasonLabel) {
     ...mentionSection,
     formatDutyScheduleHtml(result, "")
   ].join("\n");
+}
+
+
+async function notifyDutyScheduleForDate(date, reasonLabel) {
+  const text = await buildDutyScheduleReminderText(date, reasonLabel);
   await notifyAllowedUsers(text, { parse_mode: "HTML", disable_web_page_preview: true });
 }
 
+async function sendPendingDutyReminder(reminder) {
+  let delivery = pendingDutyReminderDeliveries.get(reminder.key);
+  if (!delivery) {
+    const ids = await getAllowedTelegramIds();
+    delivery = { key: reminder.key, date: reminder.date, label: reminder.label, pendingIds: new Set(ids.map(String)), text: null };
+    pendingDutyReminderDeliveries.set(reminder.key, delivery);
+  }
+  if (!delivery.pendingIds.size) return true;
+  if (!delivery.text) delivery.text = await buildDutyScheduleReminderText(delivery.date, delivery.label);
+  for (const telegramId of Array.from(delivery.pendingIds)) {
+    try {
+      await bot.telegram.sendMessage(telegramId, delivery.text, { parse_mode: "HTML", disable_web_page_preview: true });
+      delivery.pendingIds.delete(telegramId);
+      console.log(`[Cron:duty][GMT+7] Delivered ${delivery.key} to ${telegramId}`);
+    } catch (error) {
+      console.warn(`[Cron:duty][GMT+7] Retry pending ${delivery.key} for ${telegramId}:`, error.message);
+    }
+  }
+  if (delivery.pendingIds.size) return false;
+  pendingDutyReminderDeliveries.delete(reminder.key);
+  return true;
+}
+
 function getDutyReminderMoment(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: config.timezoneId,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(now).reduce((acc, part) => {
-    if (part.type !== "literal") acc[part.type] = part.value;
-    return acc;
-  }, {});
+  const parts = getLocalDateTimeParts(now, dutyScheduleCronTimeZone);
   const hour = Number(parts.hour);
   const minute = Number(parts.minute);
-  if (minute > 5 || ![7, 11, 17].includes(hour)) return null;
+  if (minute > 5 || !dutyScheduleCronHours.has(hour)) return null;
   const localDate = parseWorkScheduleDateInput(`${parts.year}-${parts.month}-${parts.day}`) || now;
   if (hour === 17) {
     return {
@@ -1112,13 +1177,22 @@ function getDutyReminderMoment(now = new Date()) {
 }
 
 async function checkDutyScheduleReminders() {
+  for (const delivery of Array.from(pendingDutyReminderDeliveries.values())) {
+    const done = await sendPendingDutyReminder(delivery);
+    if (done) {
+      sentDutyReminderKeys.add(delivery.key);
+      console.log(`[Cron:duty][GMT+7] Sent ${delivery.key}`);
+    }
+  }
   const now = new Date();
   const reminder = getDutyReminderMoment(now);
-  console.log(`[Auto-Cron] Duty check at ${now.toLocaleTimeString("vi-VN", { timeZone: config.timezoneId })}`);
   if (!reminder || sentDutyReminderKeys.has(reminder.key)) return;
+  const done = await sendPendingDutyReminder(reminder);
+  if (!done) return;
   sentDutyReminderKeys.add(reminder.key);
-  await notifyDutyScheduleForDate(reminder.date, reminder.label);
+  console.log(`[Cron:duty][GMT+7] Sent ${reminder.key}`);
 }
+
 async function syncTelegramCommandMenu() {
   try {
     await bot.telegram.setMyCommands(telegramCommands);
@@ -1724,18 +1798,7 @@ async function notifyTodayDashboard() {
 }
 
 function getDashboardReminderMoment(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: config.timezoneId,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(now).reduce((acc, part) => {
-    if (part.type !== "literal") acc[part.type] = part.value;
-    return acc;
-  }, {});
+  const parts = getLocalDateTimeParts(now);
   const hour = Number(parts.hour);
   const minute = Number(parts.minute);
   if (hour !== 8 || minute > 5) return null;
@@ -1747,8 +1810,9 @@ async function checkDashboardReminder() {
   const key = getDashboardReminderMoment(now);
   console.log(`[Auto-Cron] Dashboard check at ${now.toLocaleTimeString("vi-VN", { timeZone: config.timezoneId })}`);
   if (!key || sentDashboardReminderKeys.has(key)) return;
-  sentDashboardReminderKeys.add(key);
   await notifyTodayDashboard();
+  sentDashboardReminderKeys.add(key);
+  console.log(`[Cron:dashboard] Sent ${key}`);
 }
 async function showWorkScheduleWeek(ctx, date = new Date()) {
   const account = await getHermesAccountOrReply(ctx);
@@ -2405,55 +2469,67 @@ function formatHermesNotificationHtml(notification = {}) {
 }
 
 async function checkHermesNotifications() {
-  const accounts = await getAllHermesAccounts({ secret: config.botSecretKey });
-  for (const account of accounts) {
-    if (!account.chatId || !account.hermesUsername || !account.hermesPassword) continue;
-    try {
-      const result = await enqueue(() => getHermesNotifications({
-        username: account.hermesUsername,
-        password: account.hermesPassword,
-        storageState: account.hermesSession || null
-      }));
-      if (result.storageState) {
-        await saveHermesSession({ secret: config.botSecretKey, chatId: account.chatId, storageState: result.storageState });
-      }
-      if (!result.ok) {
-        if (result.sessionExpired) {
-          await updateHermesNotificationState(account.chatId, { hermesSessionExpired: true });
+  if (hermesNotificationCheckRunning) {
+    console.log("[HermesNotify] skip: previous check still running");
+    return;
+  }
+  hermesNotificationCheckRunning = true;
+  console.log("[HermesNotify] check started");
+  try {
+    const accounts = await getAllHermesAccounts({ secret: config.botSecretKey });
+    for (const account of accounts) {
+      if (!account.chatId || !account.hermesUsername || !account.hermesPassword) continue;
+      try {
+        const result = await withTimeout(getHermesNotifications({
+          username: account.hermesUsername,
+          password: account.hermesPassword,
+          storageState: account.hermesSession || null
+        }), Math.max(config.timeoutMs * 2, 90000), `Hermes notifications ${account.chatId}`);
+        console.log(`[HermesNotify] fetched chat=${account.chatId} count=${result.notifications?.length || 0}`);
+        if (result.storageState) await saveHermesSession({ secret: config.botSecretKey, chatId: account.chatId, storageState: result.storageState });
+        if (!result.ok) {
+          if (result.sessionExpired) await updateHermesNotificationState(account.chatId, { hermesSessionExpired: true });
+          continue;
         }
-        continue;
-      }
-
-      const state = account.notificationState || {};
-      const previousKeys = new Set(state.hermesNotificationKeys || []);
-      const seenKeys = new Set(previousKeys);
-      const isFirstScan = !Array.isArray(state.hermesNotificationKeys);
-      for (const notification of result.notifications || []) {
-        if (!notification.key) continue;
-        if (seenKeys.has(notification.key)) continue;
-        seenKeys.add(notification.key);
-        if (isFirstScan) continue;
-        await bot.telegram.sendMessage(account.chatId, formatHermesNotificationHtml(notification), {
-          parse_mode: "HTML",
-          disable_web_page_preview: false,
-          ...Markup.inlineKeyboard([
-            [
+        const freshAccount = await getHermesAccount({ secret: config.botSecretKey, chatId: account.chatId }) || account;
+        const state = freshAccount.notificationState || {};
+        const previousKeys = new Set(state.hermesNotificationKeys || []);
+        const seenKeys = new Set(previousKeys);
+        const isFirstScan = !Array.isArray(state.hermesNotificationKeys);
+        const pendingNotifications = [];
+        for (const notification of result.notifications || []) {
+          if (!notification.key) continue;
+          if (seenKeys.has(notification.key)) continue;
+          seenKeys.add(notification.key);
+          if (!isFirstScan) pendingNotifications.push(notification);
+        }
+        console.log(`[HermesNotify] pending=${pendingNotifications.length}`);
+        for (const notification of pendingNotifications) {
+          await bot.telegram.sendMessage(account.chatId, formatHermesNotificationHtml(notification), {
+            parse_mode: "HTML",
+            disable_web_page_preview: false,
+            ...Markup.inlineKeyboard([[
               ...(notification.requestOrderId ? [Markup.button.callback(buttonText("detailView", "eye"), `action:view_request_order:${notification.requestOrderId}`)] : []),
               Markup.button.callback(buttonText("home", "home"), "action:menu")
-            ]
-          ])
+            ]])
+          });
+          console.log(`[HermesNotify] sent ${notification.key}`);
+        }
+        await updateHermesNotificationState(account.chatId, {
+          hermesSessionExpired: false,
+          hermesNotificationKeys: Array.from(seenKeys).slice(-500),
+          hermesNotificationCheckedAt: new Date().toISOString()
         });
+        console.log("[HermesNotify] state updated");
+      } catch (error) {
+        console.warn(`Cannot check Hermes notifications for ${account.chatId}:`, error.message);
       }
-      await updateHermesNotificationState(account.chatId, {
-        hermesSessionExpired: false,
-        hermesNotificationKeys: Array.from(seenKeys).slice(-500),
-        hermesNotificationCheckedAt: new Date().toISOString()
-      });
-    } catch (error) {
-      console.warn(`Cannot check Hermes notifications for ${account.chatId}:`, error.message);
     }
+  } finally {
+    hermesNotificationCheckRunning = false;
   }
 }
+
 async function checkAllHermesSessions() {
   const accounts = await getAllHermesAccounts({ secret: config.botSecretKey });
   for (const account of accounts) {
@@ -2481,25 +2557,21 @@ acquireInstanceLock()
   .then(() => bot.launch())
   .then(async () => {
     console.log("Hermes schedule Telegram bot is running.");
-    await syncTelegramCommandMenu();
+    console.log(`[Cron:duty][GMT+7] Active at 07:00, 11:00 today; 17:00 tomorrow.`);
+    startCronJob({ name: "duty", everyMs: 60 * 1000, task: checkDutyScheduleReminders });
+    startCronJob({ name: "dashboard", everyMs: 60 * 1000, task: checkDashboardReminder });
+    startCronJob({ name: "hermes-notification", everyMs: 30 * 1000, task: checkHermesNotifications });
+    setTimeout(() => checkAllHermesSessions().catch(console.error), 60 * 1000);
+    startCronJob({ name: "hermes-session", everyMs: 30 * 60 * 1000, task: checkAllHermesSessions, immediate: false });
+    startCronJob({
+      name: "github-update",
+      everyMs: Math.max(config.githubVersionCheckIntervalMinutes, 5) * 60 * 1000,
+      task: checkGithubUpdateNotification
+    });
+    syncTelegramCommandMenu().catch(console.error);
     if (config.startupNotify) {
-      await notifyAllowedUsers("Bot lịch Hermes đã khởi động OK.");
+      notifyAllowedUsers("Bot l?ch Hermes ?? kh?i ??ng OK.").catch(console.error);
     }
-    
-    // Start session monitoring
-    setInterval(() => checkAllHermesSessions().catch(console.error), 30 * 60 * 1000); // Check every 30 mins
-    checkAllHermesSessions().catch(console.error); // Check once on start
-    setInterval(() => checkDutyScheduleReminders().catch(console.error), 60 * 1000);
-    setInterval(() => checkDashboardReminder().catch(console.error), 60 * 1000);
-    checkDutyScheduleReminders().catch(console.error);
-    checkDashboardReminder().catch(console.error);
-    setInterval(() => checkHermesNotifications().catch(console.error), 30 * 1000);
-    checkHermesNotifications().catch(console.error);
-    setInterval(
-      () => checkGithubUpdateNotification().catch(console.error),
-      Math.max(config.githubVersionCheckIntervalMinutes, 5) * 60 * 1000
-    );
-    checkGithubUpdateNotification().catch(console.error);
   })
   .catch(async (error) => {
     console.error("Cannot launch Hermes schedule bot:", error);
@@ -2508,11 +2580,13 @@ acquireInstanceLock()
   });
 
 process.once("SIGINT", async () => {
+  for (const timer of cronJobs) clearInterval(timer);
   bot.stop("SIGINT");
   await releaseInstanceLock();
 });
 
 process.once("SIGTERM", async () => {
+  for (const timer of cronJobs) clearInterval(timer);
   bot.stop("SIGTERM");
   await releaseInstanceLock();
 });

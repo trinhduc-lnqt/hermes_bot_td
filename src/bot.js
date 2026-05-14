@@ -55,11 +55,14 @@ let queue = Promise.resolve();
 const sentDutyReminderKeys = new Set();
 const pendingDutyReminderDeliveries = new Map();
 const sentDashboardReminderKeys = new Set();
+const sentKpiLiveReminderKeys = new Set();
 const cronJobs = [];
 const dutyScheduleCronTimeZone = "Asia/Bangkok";
-const dutyScheduleCronHours = new Set([7, 11, 17]);
+const dutyScheduleCronHours = new Set(config.dutyReminderHours);
 let hermesNotificationCheckRunning = false;
 let notifiedGithubVersion = null;
+let bootDutyTestReminder = null;
+let schedulersStarted = false;
 
 const telegramCommands = [
   { command: "start", description: "Mở menu Hermes" },
@@ -67,7 +70,7 @@ const telegramCommands = [
   { command: "lich", description: "Xem lịch làm việc" },
   { command: "truc", description: "Xem lịch trực từ Google Sheet" },
   { command: "kpi", description: "Xem KPI tháng và năm" },
-  { command: "pointkpi", description: "Mở Bảng Vàng KPI Hà Nội" },
+  { command: "pointkpi", description: "Mở KPI Live" },
   { command: "sethermes", description: "Lưu tài khoản Hermes" },
   { command: "deletehermes", description: "Xóa tài khoản Hermes" },
   { command: "id", description: "Xem Telegram ID" },
@@ -111,6 +114,7 @@ function startCronJob({ name, everyMs, task, immediate = true }) {
   };
   const timer = setInterval(() => tick().catch(console.error), everyMs);
   cronJobs.push(timer);
+  console.log(`[Cron:${name}] scheduled every ${Math.round(everyMs / 1000)}s immediate=${immediate}`);
   if (immediate) tick().catch(console.error);
   return timer;
 }
@@ -165,7 +169,7 @@ async function isAllowedUser(ctx) {
 function keyboard() {
   return Markup.inlineKeyboard([
     [Markup.button.callback(buttonText("dashboard", "menu"), "action:today_dashboard"), Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi")],
-    [Markup.button.callback(buttonText("kpiHaNoiProMax", "leaderboard"), "action:hermes_point_kpi"), Markup.button.callback(buttonText("workSchedule", "calendar"), "action:hermes_work_menu")],
+    [Markup.button.callback(buttonText("pointRealtime", "realtime"), "action:hermes_point_kpi"), Markup.button.callback(buttonText("workSchedule", "calendar"), "action:hermes_work_menu")],
     [Markup.button.callback(buttonText("duty", "clipboard"), "action:duty_menu"), Markup.button.callback(buttonText("account", "user"), "action:hermes_account_menu")]
   ]);
 }
@@ -268,7 +272,7 @@ function dashboardKeyboard() {
       Markup.button.callback(buttonText("duty", "clipboard"), "action:duty_menu"),
       Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi"),
     ],
-    [Markup.button.callback(buttonText("kpiHaNoiProMax", "leaderboard"), "action:hermes_point_kpi")],
+    [Markup.button.callback(buttonText("pointRealtime", "realtime"), "action:hermes_point_kpi")],
     [
       Markup.button.callback(buttonText("home", "home"), "action:menu")
     ]
@@ -976,7 +980,8 @@ function homeText(telegramId) {
     "• <b>Tổng hợp</b>: xem nhanh lịch trực, lịch Hermes và KPI hôm nay.",
     "• <b>Lịch làm việc</b>: xem lịch ngày, tuần, mở nhanh phiếu Hermes bằng mã <code>#phiếu</code>.",
     "• <b>Lịch trực</b>: xem trực ngày/tuần và nhận nhắc lịch trực tự động.",
-    "• <b>KPI</b>: xem KPI từng tháng năm 2026, point, doanh thu phòng, tạm tính phân bổ cá nhân và Bảng Vàng KPI Hà Nội realtime.",
+    "• <b>KPI</b>: xem KPI từng tháng năm 2026, point, doanh thu phòng và tạm tính phân bổ cá nhân.",
+    "• <b>KPI Live</b>: xem điểm realtime phòng Hà Nội.",
     "• <b>Thông báo Hermes</b>: tự báo khi có thông báo mới hoặc phiếu yêu cầu đổi trạng thái, không báo trùng.",
     "",
     "⌨️ <b>LỆNH NHANH</b>",
@@ -987,7 +992,7 @@ function homeText(telegramId) {
     "• <code>/truc</code> - Xem lịch trực hôm nay",
     "• <code>/truc mai</code> - Xem lịch trực ngày mai",
     "• <code>/kpi</code> - Mở menu KPI theo tháng",
-    "• <code>/pointkpi</code> - Mở Bảng Vàng KPI Hà Nội realtime",
+    "• <code>/pointkpi</code> - Mở KPI Live",
     "• <code>/sethermes</code> - Lưu hoặc đổi tài khoản Hermes",
     "• <code>/deletehermes</code> - Xóa tài khoản Hermes đã lưu",
     "• <code>/id</code> - Xem Telegram ID",
@@ -1155,7 +1160,7 @@ async function sendPendingDutyReminder(reminder) {
   let delivery = pendingDutyReminderDeliveries.get(reminder.key);
   if (!delivery) {
     const ids = await getAllowedTelegramIds();
-    delivery = { key: reminder.key, date: reminder.date, label: reminder.label, pendingIds: new Set(ids.map(String)), text: null };
+    delivery = { key: reminder.key, date: reminder.date, label: reminder.label, pendingIds: new Set(Array.from(ids).map(String)), text: null };
     pendingDutyReminderDeliveries.set(reminder.key, delivery);
   }
   if (!delivery.pendingIds.size) return true;
@@ -1178,8 +1183,24 @@ function getDutyReminderMoment(now = new Date()) {
   const parts = getLocalDateTimeParts(now, dutyScheduleCronTimeZone);
   const hour = Number(parts.hour);
   const minute = Number(parts.minute);
-  if (minute > 5 || !dutyScheduleCronHours.has(hour)) return null;
   const localDate = parseWorkScheduleDateInput(`${parts.year}-${parts.month}-${parts.day}`) || now;
+  if (bootDutyTestReminder && now >= bootDutyTestReminder.at) {
+    return {
+      key: `boot-test-${bootDutyTestReminder.at.toISOString().slice(0, 16)}`,
+      date: getRelativeWorkScheduleDate(1, localDate),
+      label: `TEST BOOT +${config.dutyTestReminderOffsetMinutes} phút - lịch trực ngày mai`
+    };
+  }
+  const extraReminder = config.dutyExtraReminders.find((item) => item.hour === hour && minute >= item.minute && minute < item.minute + config.dutyReminderGraceMinutes);
+  if (extraReminder) {
+    const isTomorrow = extraReminder.target === "tomorrow";
+    return {
+      key: `${parts.year}-${parts.month}-${parts.day}-${String(extraReminder.hour).padStart(2, "0")}${String(extraReminder.minute).padStart(2, "0")}-${extraReminder.target}-${extraReminder.label}`,
+      date: isTomorrow ? getRelativeWorkScheduleDate(1, localDate) : localDate,
+      label: `${String(extraReminder.hour).padStart(2, "0")}:${String(extraReminder.minute).padStart(2, "0")} - ${isTomorrow ? "lịch trực ngày mai" : "lịch trực hôm nay"} (${extraReminder.label})`
+    };
+  }
+  if (minute >= config.dutyReminderGraceMinutes || !dutyScheduleCronHours.has(hour)) return null;
   if (hour === 17) {
     return {
       key: `${parts.year}-${parts.month}-${parts.day}-17-tomorrow`,
@@ -1205,10 +1226,12 @@ async function checkDutyScheduleReminders() {
   const now = new Date();
   const reminder = getDutyReminderMoment(now);
   if (!reminder || sentDutyReminderKeys.has(reminder.key)) return;
+  console.log(`[Cron:duty][${dutyScheduleCronTimeZone}] Due ${reminder.key}`);
   const done = await sendPendingDutyReminder(reminder);
   if (!done) return;
   sentDutyReminderKeys.add(reminder.key);
   console.log(`[Cron:duty][GMT+7] Sent ${reminder.key}`);
+  if (bootDutyTestReminder && reminder.key.startsWith("boot-test-")) bootDutyTestReminder = null;
 }
 
 async function syncTelegramCommandMenu() {
@@ -1374,13 +1397,7 @@ function kpiKeyboard(months = []) {
     rows.push(monthButtons.slice(i, i + 3));
   }
 
-  rows.push([Markup.button.callback(buttonText("kpiLeaderBoardHaNoi", "leaderboard"), "action:hermes_point_kpi")]);
-  const homeButton = Markup.button.callback(buttonText("homeMain", "home"), "action:menu");
-  if (rows.length && rows[rows.length - 1].length < 3) {
-    rows[rows.length - 1].push(homeButton);
-  } else {
-    rows.push([homeButton]);
-  }
+  rows.push([Markup.button.callback(buttonText("homeMain", "home"), "action:menu")]);
   return Markup.inlineKeyboard(rows);
 }
 
@@ -1435,40 +1452,52 @@ function formatSupportDisplayName(value = "") {
   return raw ? raw.replace(/@ipos\.vn$/i, "") : "---";
 }
 
-function formatSupportRoom(value = "") {
-  return String(value || "").trim().toUpperCase() === "HAN_SUPPORT" ? "Hà Nội" : (value || "---");
-}
-
 function formatPointKpiRealtimeHtml(result = {}) {
   const totals = result.totals || {};
   const checkedAt = result.checkedAt ? new Date(result.checkedAt) : new Date();
-  const items = [...(result.items || [])].sort((a, b) => Number(b.pointTotal || b.pointKpi || b.kpi || 0) - Number(a.pointTotal || a.pointKpi || a.kpi || 0));
+  const items = [...(result.items || [])];
+  const getTotalPoint = (item = {}) => Number(item.pointTotal || item.pointKpi || item.kpi || 0);
+  const groupedItems = items.reduce((groups, item) => {
+    const team = item.team || "---";
+    if (!groups.has(team)) groups.set(team, []);
+    groups.get(team).push(item);
+    return groups;
+  }, new Map());
+  const teamGroups = [...groupedItems.entries()]
+    .map(([team, members]) => ({
+      team,
+      members: members.sort((a, b) => getTotalPoint(b) - getTotalPoint(a)),
+      totalPoint: members.reduce((sum, item) => sum + getTotalPoint(item), 0)
+    }))
+    .sort((a, b) => b.totalPoint - a.totalPoint);
   const tableRows = [
-    `${padRight("Nhân viên", 30)} ${padRight("Lvl", 3)} ${padRight("Team", 12)} ${padRight("Phòng", 11)} ${padLeft("Gốc", 7)} ${padLeft("Thưởng", 7)} ${padLeft("Tổng", 7)}`,
-    `${"-".repeat(30)} ${"-".repeat(3)} ${"-".repeat(12)} ${"-".repeat(11)} ${"-".repeat(7)} ${"-".repeat(7)} ${"-".repeat(7)}`,
-    ...items.map((item) => {
-      const support = item.supportName ? String(item.supportName) : formatSupportDisplayName(item.support);
-      const level = item.level || "---";
-      const team = item.team || "---";
-      const room = formatSupportRoom(item.department || result.room || "HAN_SUPPORT");
-      const basePoint = formatMetricValue(item.pointKpi || 0, 1);
-      const bonusPoint = formatMetricValue(item.pointSupport || 0, 1);
-      const totalPoint = formatMetricValue(item.pointTotal || item.kpi || 0, 1);
-      return `${padRight(support, 30)} ${padRight(level, 3)} ${padRight(team, 12)} ${padRight(room, 11)} ${padLeft(basePoint, 7)} ${padLeft(bonusPoint, 7)} ${padLeft(totalPoint, 7)}`;
-    })
+    `${padRight("Nhân viên", 30)} ${padRight("Lvl", 3)} ${padLeft("Gốc", 7)} ${padLeft("Thưởng", 7)} ${padLeft("Tổng", 7)}`,
+    `${"-".repeat(30)} ${"-".repeat(3)} ${"-".repeat(7)} ${"-".repeat(7)} ${"-".repeat(7)}`,
+    ...teamGroups.flatMap(({ team, members, totalPoint }, index) => [
+      ...(index > 0 ? ["-".repeat(58)] : []),
+      `Team ${team} - ${formatMetricValue(totalPoint, 1)}`,
+      ...members.map((item) => {
+        const support = item.supportName ? String(item.supportName) : formatSupportDisplayName(item.support);
+        const level = item.level || "---";
+        const basePoint = formatMetricValue(item.pointKpi || 0, 1);
+        const bonusPoint = formatMetricValue(item.pointSupport || 0, 1);
+        const memberTotalPoint = formatMetricValue(getTotalPoint(item), 1);
+        return `${padRight(support, 30)} ${padRight(level, 3)} ${padLeft(basePoint, 7)} ${padLeft(bonusPoint, 7)} ${padLeft(memberTotalPoint, 7)}`;
+      })
+    ])
   ];
   return [
-    `${ICON.realtime} <b>POINT KPI REALTIME</b>`,
+    `${ICON.realtime} <b>KPI Live</b>`,
     "━━━━━━━━━━━━━━━━━━━━",
-    `${ICON.room} <b>Phòng:</b> <code>Hà Nội</code>`,
+    `${ICON.room} <b>Khu vực:</b> <code>Hà Nội</code>`,
     result.monthLabel ? `${ICON.week} <b>Tháng:</b> <code>${escapeHtml(result.monthLabel)}</code>` : "",
     `${ICON.calendar} <b>Ngày xem:</b> ${escapeHtml(formatViewDate(checkedAt))}`,
     `${ICON.time} <b>Thời gian xem:</b> ${escapeHtml(formatViewTime(checkedAt))}`,
     "",
-    `${ICON.point} <b>Tổng điểm:</b> ${formatMetricValue(totals.pointTotal || totals.pointKpi || totals.kpi || 0, 2)}`,
-    `${ICON.total} <b>Số dòng Hà Nội:</b> ${items.length}`,
+    `${ICON.point} <b>Tổng KPI Live:</b> ${formatMetricValue(totals.pointTotal || totals.pointKpi || totals.kpi || 0, 2)}`,
+    `${ICON.total} <b>Số nhân sự:</b> ${items.length}`,
     "",
-    "<b>Bảng xếp hạng:</b>",
+    "<b>Chi tiết KPI Live:</b>",
     `<pre>${escapeHtml(tableRows.join("\n"))}</pre>`,
     "━━━━━━━━━━━━━━━━━━━━"
   ].filter(Boolean).join("\n");
@@ -1639,7 +1668,7 @@ function parseKpiMonthInput(text = "") {
 
 async function showPointKpiRealtime(ctx, month = null) {
   const monthText = month ? ` ${String(month).replace("_", "/")}` : "";
-  const loadingMessageId = await sendTempMessage(ctx, `${ICON.leaderboard} Đang mở Bảng Vàng KPI Hà Nội${monthText}...`);
+  const loadingMessageId = await sendTempMessage(ctx, `${ICON.realtime} Đang mở KPI Live${monthText}...`);
   try {
     const account = await getHermesAccountOrReply(ctx);
     if (!account) return;
@@ -1653,7 +1682,7 @@ async function showPointKpiRealtime(ctx, month = null) {
       await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
     }
     if (!result?.ok) {
-      await replyFresh(ctx, `Không tải được Bảng Vàng KPI Hà Nội.\n${String(result?.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
+      await replyFresh(ctx, `Không tải được KPI Live.\n${String(result?.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
       return;
     }
     await replyFresh(ctx, formatPointKpiRealtimeHtml(result), {
@@ -1662,15 +1691,75 @@ async function showPointKpiRealtime(ctx, month = null) {
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback(buttonText("refreshLeaderBoard", "refresh"), "action:hermes_point_kpi"),
-          Markup.button.callback(buttonText("thisMonth", "calendar"), `action:hermes_point_kpi_month:${new Date().getFullYear()}_${String(new Date().getMonth() + 1).padStart(2, "0")}`),
-          Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi")
-        ],
-        [Markup.button.callback(buttonText("home", "home"), "action:menu")]
+          Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi"),
+          Markup.button.callback(buttonText("home", "home"), "action:menu")
+        ]
       ])
     });
   } finally {
     await deleteTempMessage(ctx, loadingMessageId);
   }
+}
+
+async function notifyKpiLiveReminder() {
+  const accounts = await getAllHermesAccounts({ secret: config.botSecretKey });
+  const account = accounts.find((item) => item.chatId && item.hermesUsername && item.hermesPassword);
+  if (!account) {
+    console.warn("[Cron:kpi-live] No Hermes account available to load KPI Live.");
+    return;
+  }
+  const result = await enqueue(() => getHermesKpiSupportRealtime({
+    username: account.hermesUsername,
+    password: account.hermesPassword,
+    storageState: account.hermesSession
+  }));
+  if (result.storageState) {
+    await saveHermesSession({ secret: config.botSecretKey, chatId: account.chatId, storageState: result.storageState });
+  }
+  const ids = await getAllowedTelegramIds();
+  const message = result?.ok
+    ? formatPointKpiRealtimeHtml(result)
+    : `Không tải được KPI Live tự động.\n${String(result?.message || "Lỗi không xác định").slice(0, 700)}`;
+  const options = result?.ok
+    ? {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback(buttonText("refreshLeaderBoard", "refresh"), "action:hermes_point_kpi"),
+            Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi"),
+            Markup.button.callback(buttonText("home", "home"), "action:menu")
+          ]
+        ])
+      }
+    : keyboard();
+  for (const telegramId of ids) {
+    try {
+      await bot.telegram.sendMessage(telegramId, message, options);
+      console.log(`[Cron:kpi-live][GMT+7] Delivered to ${telegramId}`);
+    } catch (error) {
+      console.warn(`Cannot send KPI Live reminder to ${telegramId}:`, error.message);
+    }
+  }
+}
+
+function getKpiLiveReminderMoment(now = new Date()) {
+  const parts = getLocalDateTimeParts(now, dutyScheduleCronTimeZone);
+  const hour = Number(parts.hour);
+  const minute = Number(parts.minute);
+  const targetMinute = config.kpiLiveReminderMinute;
+  if (hour !== config.kpiLiveReminderHour || minute < targetMinute || minute >= targetMinute + config.kpiLiveReminderGraceMinutes) return null;
+  return `${parts.year}-${parts.month}-${parts.day}-${String(config.kpiLiveReminderHour).padStart(2, "0")}${String(config.kpiLiveReminderMinute).padStart(2, "0")}-kpi-live`;
+}
+
+async function checkKpiLiveReminder() {
+  const now = new Date();
+  const key = getKpiLiveReminderMoment(now);
+  if (!key || sentKpiLiveReminderKeys.has(key)) return;
+  console.log(`[Cron:kpi-live][${dutyScheduleCronTimeZone}] Due ${key}`);
+  await notifyKpiLiveReminder();
+  sentKpiLiveReminderKeys.add(key);
+  console.log(`[Cron:kpi-live][GMT+7] Sent ${key}`);
 }
 
 async function showDutySchedule(ctx, date = new Date()) {
@@ -1909,8 +1998,8 @@ function getDashboardReminderMoment(now = new Date()) {
   const parts = getLocalDateTimeParts(now);
   const hour = Number(parts.hour);
   const minute = Number(parts.minute);
-  if (hour !== 8 || minute > 5) return null;
-  return `${parts.year}-${parts.month}-${parts.day}-08-dashboard`;
+  if (hour !== config.dashboardReminderHour || minute >= config.dashboardReminderGraceMinutes) return null;
+  return `${parts.year}-${parts.month}-${parts.day}-${String(config.dashboardReminderHour).padStart(2, "0")}-dashboard`;
 }
 
 async function checkDashboardReminder() {
@@ -2278,13 +2367,13 @@ bot.action(/^action:hermes_kpi_month:(\d{4}_\d{2})$/, async (ctx) => {
 });
 
 bot.action("action:hermes_point_kpi", async (ctx) => {
-  await ctx.answerCbQuery("Đang mở Bảng Vàng KPI Hà Nội...");
+  await ctx.answerCbQuery("Đang mở KPI Live...");
   await showPointKpiRealtime(ctx);
 });
 
 bot.action(/^action:hermes_point_kpi_month:(\d{4}_\d{2})$/, async (ctx) => {
   const month = ctx.match?.[1];
-  await ctx.answerCbQuery("Đang mở Bảng Vàng KPI theo tháng...");
+  await ctx.answerCbQuery("Đang mở KPI Live theo tháng...");
   await showPointKpiRealtime(ctx, month);
 });
 
@@ -2676,21 +2765,41 @@ async function checkAllHermesSessions() {
   }
 }
 
+function startSchedulers() {
+  if (schedulersStarted) return;
+  schedulersStarted = true;
+  console.log("Hermes schedule Telegram bot scheduler is starting.");
+  console.log(`[Cron:duty][${dutyScheduleCronTimeZone}] Active hours=${Array.from(dutyScheduleCronHours).sort((a, b) => a - b).map((hour) => String(hour).padStart(2, "0") + ":00").join(", ")} grace=${config.dutyReminderGraceMinutes}m.`);
+  if (config.dutyExtraReminders.length) {
+    console.log(`[Cron:duty][${dutyScheduleCronTimeZone}] Extra reminders=${config.dutyExtraReminders.map((item) => `${String(item.hour).padStart(2, "0")}:${String(item.minute).padStart(2, "0")}:${item.target}:${item.label}`).join(", ")}`);
+  }
+  if (config.dutyTestReminderOffsetMinutes > 0) {
+    bootDutyTestReminder = { at: new Date(Date.now() + config.dutyTestReminderOffsetMinutes * 60 * 1000) };
+    console.log(`[Cron:duty][${dutyScheduleCronTimeZone}] Boot test reminder at ${bootDutyTestReminder.at.toISOString()}`);
+  }
+  console.log(`[Cron:dashboard][${config.timezoneId}] Active at ${String(config.dashboardReminderHour).padStart(2, "0")}:00 grace=${config.dashboardReminderGraceMinutes}m.`);
+  console.log(`[Cron:kpi-live][${dutyScheduleCronTimeZone}] Active at ${String(config.kpiLiveReminderHour).padStart(2, "0")}:${String(config.kpiLiveReminderMinute).padStart(2, "0")} grace=${config.kpiLiveReminderGraceMinutes}m.`);
+  console.log(`[Cron:hermes-notification] Active every ${config.hermesNotificationIntervalSeconds}s.`);
+  startCronJob({ name: "duty", everyMs: 60 * 1000, task: checkDutyScheduleReminders });
+  startCronJob({ name: "dashboard", everyMs: 60 * 1000, task: checkDashboardReminder });
+  startCronJob({ name: "kpi-live", everyMs: 60 * 1000, task: checkKpiLiveReminder });
+  startCronJob({ name: "hermes-notification", everyMs: config.hermesNotificationIntervalSeconds * 1000, task: checkHermesNotifications });
+  setTimeout(() => checkAllHermesSessions().catch(console.error), 60 * 1000);
+  startCronJob({ name: "hermes-session", everyMs: 30 * 60 * 1000, task: checkAllHermesSessions, immediate: false });
+  startCronJob({
+    name: "github-update",
+    everyMs: Math.max(config.githubVersionCheckIntervalMinutes, 5) * 60 * 1000,
+    task: checkGithubUpdateNotification
+  });
+}
+
 acquireInstanceLock()
-  .then(() => bot.launch())
+  .then(() => {
+    startSchedulers();
+    return bot.launch();
+  })
   .then(async () => {
     console.log("Hermes schedule Telegram bot is running.");
-    console.log(`[Cron:duty][GMT+7] Active at 07:00, 11:00 today; 17:00 tomorrow.`);
-    startCronJob({ name: "duty", everyMs: 60 * 1000, task: checkDutyScheduleReminders });
-    startCronJob({ name: "dashboard", everyMs: 60 * 1000, task: checkDashboardReminder });
-    startCronJob({ name: "hermes-notification", everyMs: 30 * 1000, task: checkHermesNotifications });
-    setTimeout(() => checkAllHermesSessions().catch(console.error), 60 * 1000);
-    startCronJob({ name: "hermes-session", everyMs: 30 * 60 * 1000, task: checkAllHermesSessions, immediate: false });
-    startCronJob({
-      name: "github-update",
-      everyMs: Math.max(config.githubVersionCheckIntervalMinutes, 5) * 60 * 1000,
-      task: checkGithubUpdateNotification
-    });
     syncTelegramCommandMenu().catch(console.error);
     if (config.startupNotify) {
       notifyAllowedUsers("Bot l?ch Hermes ?? kh?i ??ng OK.").catch(console.error);

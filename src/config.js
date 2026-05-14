@@ -35,6 +35,26 @@ const checkInPath = normalizePath(process.env.IHR_CHECKIN_PATH, "/Hrm/CheckInOut
 const hermesBaseUrl = (process.env.HERMES_BASE_URL || "").trim().replace(/\/+$/, "");
 const hermesLoginPath = normalizePath(process.env.HERMES_LOGIN_PATH, "/System/Login");
 const hermesOtpTimeoutMs = toNumber(process.env.HERMES_OTP_TIMEOUT_MS, 180000);
+const dutyReminderHours = (process.env.DUTY_REMINDER_HOURS || "7,11,17")
+  .split(",")
+  .map((item) => Number(item.trim()))
+  .filter((item) => Number.isInteger(item) && item >= 0 && item <= 23);
+
+const dutyExtraReminders = (process.env.DUTY_EXTRA_REMINDERS || "")
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean)
+  .map((item) => {
+    const match = item.match(/^(\d{1,2})[:.-](\d{2})(?::(today|tomorrow))?(?::(.+))?$/i);
+    if (!match) return null;
+    return { hour: Number(match[1]), minute: Number(match[2]), target: (match[3] || "today").toLowerCase(), label: match[4] || "test" };
+  })
+  .filter(Boolean)
+  .filter((item) => Number.isInteger(item.hour) && item.hour >= 0 && item.hour <= 23 && Number.isInteger(item.minute) && item.minute >= 0 && item.minute <= 59);
+
+const dutyTestReminderOffsetMinutes = toInteger(process.env.DUTY_TEST_REMINDER_OFFSET_MINUTES, 0);
+const kpiLiveReminderTime = (process.env.KPI_LIVE_REMINDER_TIME || "22:15").trim();
+const kpiLiveReminderMatch = kpiLiveReminderTime.match(/^(\d{1,2})[:.](\d{2})$/);
 
 const allowedIds = (process.env.ALLOWED_TELEGRAM_IDS || "")
   .split(",")
@@ -81,6 +101,16 @@ export const config = {
   githubVersionCheckEnabled: toBoolean(process.env.GITHUB_VERSION_CHECK_ENABLED, true),
   githubPackageUrl: (process.env.GITHUB_PACKAGE_URL || defaultGithubPackageUrl).trim(),
   githubVersionCheckIntervalMinutes: toInteger(process.env.GITHUB_VERSION_CHECK_INTERVAL_MINUTES, 30),
+  dutyReminderHours: dutyReminderHours.length ? dutyReminderHours : [7, 11, 17],
+  dutyExtraReminders,
+  dutyTestReminderOffsetMinutes,
+  dutyReminderGraceMinutes: Math.max(1, toInteger(process.env.DUTY_REMINDER_GRACE_MINUTES, 20)),
+  dashboardReminderHour: Math.min(23, toInteger(process.env.DASHBOARD_REMINDER_HOUR, 8)),
+  dashboardReminderGraceMinutes: Math.max(1, toInteger(process.env.DASHBOARD_REMINDER_GRACE_MINUTES, 20)),
+  kpiLiveReminderHour: kpiLiveReminderMatch ? Math.min(23, Number(kpiLiveReminderMatch[1])) : 22,
+  kpiLiveReminderMinute: kpiLiveReminderMatch ? Math.min(59, Number(kpiLiveReminderMatch[2])) : 15,
+  kpiLiveReminderGraceMinutes: Math.max(1, toInteger(process.env.KPI_LIVE_REMINDER_GRACE_MINUTES, 5)),
+  hermesNotificationIntervalSeconds: Math.max(15, toInteger(process.env.HERMES_NOTIFICATION_INTERVAL_SECONDS, 30)),
   lockPort: toInteger(process.env.BOT_LOCK_PORT, 47831),
   locale: (process.env.IHR_LOCALE || "vi-VN").trim(),
   timezoneId: (process.env.IHR_TIMEZONE || "Asia/Ho_Chi_Minh").trim(),

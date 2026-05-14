@@ -229,7 +229,7 @@ pm2 save
 - `/truc`: lich truc hom nay.
 - `/truc mai`: lich truc ngay mai.
 - `/kpi`: KPI thang/nam.
-- `/pointkpi`: Bang Vang KPI Ha Noi realtime, hien thi tong diem, ngay xem, thoi gian xem va bang xep hang phong Ha Noi.
+- `/pointkpi`: KPI Live, hien thi tong diem, ngay xem, thoi gian xem va bang xep hang phong Ha Noi.
 - `/sethermes`: luu/cap nhat tai khoan Hermes.
 - `/deletehermes`: xoa tai khoan Hermes.
 - `/id`: xem Telegram ID.
@@ -257,25 +257,35 @@ Tinh nang:
 
 - Xem theo ngay.
 - Xem ca tuan.
-- Nhac tu dong luc `07:00`, `11:00`, `17:00`.
+- Nhac tu dong luc `07:00`, `11:00`, `17:00` theo gio Viet Nam.
+- Cron co cua so chay mac dinh `20 phut` de tranh miss neu bot khoi dong cham hoac tick bi tre.
+- Cau hinh bang `DUTY_REMINDER_HOURS` va `DUTY_REMINDER_GRACE_MINUTES`.
 - Chu nhat co ca 1/ca 2/server rieng.
 - Ten nguoi truc format qua `formatDutyInlinePeople()`.
 - Lich tuan co header ngay ro: `THU ? DD/MM/YYYY`.
 
 ## 13. Dashboard Hang Ngay
 
-Tu gui luc `08:00`.
+Tu gui luc `08:00`, co cua so chay mac dinh `20 phut`.
+
+Cau hinh bang `DASHBOARD_REMINDER_HOUR` va `DASHBOARD_REMINDER_GRACE_MINUTES`.
+
+KPI Live tu dong gui luc `22:15` gio Viet Nam, co cua so chay mac dinh `5 phut`.
+
+Cau hinh bang `KPI_LIVE_REMINDER_TIME` va `KPI_LIVE_REMINDER_GRACE_MINUTES`.
 
 Noi dung gom:
 
 - Lich truc.
 - Lich lam viec Hermes.
 - KPI/doanh thu neu co tai khoan Hermes hop le.
-- Bang Vang KPI Ha Noi realtime tu Hermes neu co tai khoan Hermes hop le.
+- KPI Live tu Hermes neu co tai khoan Hermes hop le.
 
 ## 14. Thong Bao Hermes Moi
 
 Bot check moi `30 giay`.
+
+Cau hinh bang `HERMES_NOTIFICATION_INTERVAL_SECONDS`.
 
 Co che:
 

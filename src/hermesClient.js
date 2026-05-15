@@ -589,6 +589,23 @@ function buildRequestOrderPageUrl(id) {
   return baseUrl && id ? `${baseUrl}/request-order/${id}` : "";
 }
 
+function buildRequestOrderMonthListUrl(page, params = {}) {
+  const baseUrl = getHermesBaseUrl();
+  if (!baseUrl) {
+    throw new Error("Chua cau hinh HERMES_BASE_URL/HERMES_LOGIN_URL.");
+  }
+  const encodeDate = (value) => String(value || "").replace(/ /g, "%20");
+  const query = [
+    `page=${Number(page || 1)}`,
+    `page=${Number(page || 1)}`,
+    `numPerPage=${Number(params.numPerPage || 200)}`,
+    params.picSp ? `picSp=${String(params.picSp)}` : "",
+    `createdTimeFrom=${encodeDate(params.createdTimeFrom)}`,
+    `createdTimeTo=${encodeDate(params.createdTimeTo)}`
+  ].filter(Boolean).join("&");
+  return `${baseUrl}/api/request-order/get-all?${query}`;
+}
+
 function mapScheduleType(type) {
   const raw = String(type || "").trim();
   const value = raw.toUpperCase();
@@ -2042,6 +2059,146 @@ export async function getRequestOrderDetailById({ username, password, requestOrd
   try {
     const result = await fetchRequestOrderFromLoggedInPage(login.page, requestOrderId, login.apiResponses);
     return { ...result, storageState: result.ok ? await login.context.storageState().catch(() => null) : null };
+  } finally {
+    await login.browser.close().catch(() => {});
+  }
+}
+
+function getRequestOrderMonthRange(month = new Date()) {
+  const raw = String(month || "").trim();
+  const match = raw.match(/^(\d{4})[-_](\d{1,2})$/);
+  const now = new Date();
+  const year = match ? Number(match[1]) : now.getFullYear();
+  const monthNumber = match ? Number(match[2]) : now.getMonth() + 1;
+  if (!Number.isInteger(year) || !Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12) {
+    throw new Error("Tháng PYC không hợp lệ. Dùng YYYY_MM hoặc YYYY-MM.");
+  }
+  const pad = (value) => String(value).padStart(2, "0");
+  const lastDay = new Date(year, monthNumber, 0).getDate();
+  return {
+    key: `${year}_${pad(monthNumber)}`,
+    label: `${pad(monthNumber)}/${year}`,
+    createdTimeFrom: `${year}-${pad(monthNumber)}-01 00:00:00`,
+    createdTimeTo: `${year}-${pad(monthNumber)}-${pad(lastDay)} 23:59:59`
+  };
+}
+
+function isCancelledRequestOrder(item = {}) {
+  const haystack = [
+    item.status,
+    item.statusName,
+    item.statusText,
+    item.spStatus,
+    item.spStatusName,
+    item.saleStatus,
+    item.saleStatusName,
+    item.requestStatus,
+    item.requestStatusName
+  ].filter(Boolean).join(" | ");
+  return /CANCEL+ED|CANCEL+LED|CANCELED|CANCELLED|ĐÃ\s*HỦY|ĐÃ\s*HUỶ|DA\s*HUY|HUỶ|HỦY/i.test(haystack);
+}
+
+async function getRequestOrderUiHeaders(page) {
+  const capturedHeaders = await new Promise((resolve) => {
+    let done = false;
+    const finish = (headers = null) => {
+      if (done) return;
+      done = true;
+      page.off("request", onRequest);
+      resolve(headers);
+    };
+    const onRequest = (request) => {
+      if (/\/api\/request-order\/get-all/i.test(request.url())) {
+        finish(request.headers());
+      }
+    };
+    page.on("request", onRequest);
+    setTimeout(() => finish(null), 12000);
+  });
+  if (capturedHeaders?.authorization) {
+    return capturedHeaders;
+  }
+  return await page.evaluate(() => {
+    const deviceId = localStorage.getItem("device_id") || "";
+    const server = localStorage.getItem("server") || "LIVE";
+    return {
+      accept: "application/json, text/plain, */*",
+      language: navigator.language || "en-US",
+      server,
+      ...(deviceId ? { deviceid: deviceId } : {}),
+      appversion: navigator.userAgent,
+      model: navigator.userAgent,
+      ostype: navigator.platform || "Win32",
+      "x-real-ip": "127.0.0.1"
+    };
+  }).catch(() => ({ accept: "application/json, text/plain, */*", server: "LIVE" }));
+}
+
+async function fetchRequestOrderMonthFromLoggedInPage(page, monthRange, username = "", requestHeaders = null) {
+  const items = [];
+  let rawCount = 0;
+  let totalPage = 1;
+  for (let pageNumber = 1; pageNumber <= totalPage; pageNumber += 1) {
+    const requestUrl = buildRequestOrderMonthListUrl(pageNumber, {
+      picSp: username,
+      createdTimeFrom: monthRange.createdTimeFrom,
+      createdTimeTo: monthRange.createdTimeTo,
+      numPerPage: 200
+    });
+    const fetched = await page.evaluate(async ({ url, headers }) => {
+      const response = await fetch(url, { credentials: "include", headers });
+      return { status: response.status, body: await response.text() };
+    }, { url: requestUrl, headers: requestHeaders || { accept: "application/json, text/plain, */*" } }).catch((error) => ({ status: 0, body: error.message || "" }));
+    if ([401, 403].includes(fetched.status) || /login|unauthori[sz]ed|otp|forbidden/i.test(fetched.body || "")) {
+      return { ok: false, sessionExpired: true, message: "Phiên Hermes đã hết hạn hoặc API yêu cầu đăng nhập lại." };
+    }
+    const parsed = parseJsonSafe(fetched.body);
+    const data = parsed?.data || {};
+    const pageItems = Array.isArray(data.data) ? data.data : [];
+    rawCount += pageItems.length;
+    items.push(...pageItems.filter((item) => !isCancelledRequestOrder(item)));
+    totalPage = Math.max(1, Number(data.totalPage || Math.ceil(Number(data.count || 0) / Number(data.numPerPage || 200)) || 1));
+  }
+  return {
+    ok: true,
+    month: monthRange.key,
+    label: monthRange.label,
+    rawCount,
+    count: items.length,
+    items,
+    checkedAt: new Date()
+  };
+}
+
+export async function getRequestOrderMonthList({ username, password, month, storageState = null }) {
+  const monthRange = getRequestOrderMonthRange(month);
+  const runWithSession = async (session, currentStorageState = null) => {
+    const requestHeadersPromise = getRequestOrderUiHeaders(session.page);
+    await session.page.goto(new URL("/request-order-filter", config.hermesLoginUrl).toString(), { waitUntil: "domcontentloaded", timeout: config.timeoutMs }).catch(() => {});
+    const requestHeaders = await requestHeadersPromise;
+    await session.page.waitForTimeout(500);
+    if (await hasVisibleOtpInput(session.page) || !(await isLoggedIn(session.page))) {
+      return { ok: false, sessionExpired: true, message: "Phiên Hermes đã hết hạn hoặc bị yêu cầu đăng nhập lại.", storageState: currentStorageState };
+    }
+    const result = await fetchRequestOrderMonthFromLoggedInPage(session.page, monthRange, username, requestHeaders);
+    return { ...result, storageState: result.ok ? await session.context.storageState().catch(() => currentStorageState) : currentStorageState };
+  };
+
+  if (storageState) {
+    const session = await createHermesBrowserContext(storageState);
+    try {
+      return await runWithSession(session, storageState);
+    } finally {
+      await session.browser.close().catch(() => {});
+    }
+  }
+
+  const login = await loginHermesPage({ username, password, purpose: "request_order_month" });
+  if (!login.ok) {
+    return { ...login, sessionExpired: login.otpRequired };
+  }
+  try {
+    return await runWithSession(login, null);
   } finally {
     await login.browser.close().catch(() => {});
   }

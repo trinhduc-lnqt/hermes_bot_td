@@ -20,6 +20,7 @@ import {
   getKpiSummary,
   getHermesRoomRevenue,
   getHermesNotifications,
+  getRequestOrderMonthList,
   parseWorkScheduleDateInput,
   sortWorkScheduleEntries,
   submitHermesOtp,
@@ -170,7 +171,8 @@ function keyboard() {
   return Markup.inlineKeyboard([
     [Markup.button.callback(buttonText("dashboard", "menu"), "action:today_dashboard"), Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi")],
     [Markup.button.callback(buttonText("pointRealtime", "realtime"), "action:hermes_point_kpi"), Markup.button.callback(buttonText("workSchedule", "calendar"), "action:hermes_work_menu")],
-    [Markup.button.callback(buttonText("duty", "clipboard"), "action:duty_menu"), Markup.button.callback(buttonText("account", "user"), "action:hermes_account_menu")]
+    [Markup.button.callback(buttonText("kpiDeployLive", "deploy"), "action:request_order_month_menu"), Markup.button.callback(buttonText("duty", "clipboard"), "action:duty_menu")],
+    [Markup.button.callback(buttonText("account", "user"), "action:hermes_account_menu")]
   ]);
 }
 
@@ -307,6 +309,37 @@ function dutyMenuKeyboard() {
       Markup.button.callback(buttonText("week", "week"), `action:duty_week:${today}`),
       Markup.button.callback(buttonText("chooseDate", "calendar"), "action:duty_other"),
       Markup.button.callback(buttonText("home", "home"), "action:menu")
+    ]
+  ]);
+}
+
+function requestOrderMonthKeyboard() {
+  const reportYear = 2026;
+  const parts = getLocalDateTimeParts(new Date());
+  const currentYear = Number(parts.year);
+  const currentMonth = Number(parts.month);
+  const maxEnabledMonth = currentYear > reportYear ? 12 : currentYear === reportYear ? currentMonth : 0;
+  const monthButtons = Array.from({ length: 12 }, (_, index) => {
+    const monthNumber = index + 1;
+    const monthText = String(monthNumber).padStart(2, "0");
+    const enabled = monthNumber <= maxEnabledMonth;
+    return enabled
+      ? Markup.button.callback(`${ICON.deploy} ${monthText}/${reportYear}`, `action:request_order_month:${reportYear}_${monthText}`)
+      : Markup.button.callback(`${ICON.locked} ${monthText}/${reportYear}`, "action:noop");
+  });
+  const rows = [];
+  for (let index = 0; index < monthButtons.length; index += 3) {
+    rows.push(monthButtons.slice(index, index + 3));
+  }
+  rows.push([Markup.button.callback(buttonText("home", "home"), "action:menu")]);
+  return Markup.inlineKeyboard(rows);
+}
+
+function requestOrderSummaryKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback(`${ICON.back} Quay lại`, "action:request_order_month_menu"),
+      Markup.button.callback(buttonText("homeMain", "home"), "action:menu")
     ]
   ]);
 }
@@ -982,6 +1015,7 @@ function homeText(telegramId) {
     "• <b>Lịch trực</b>: xem trực ngày/tuần và nhận nhắc lịch trực tự động.",
     "• <b>KPI</b>: xem KPI từng tháng năm 2026, point, doanh thu phòng và tạm tính phân bổ cá nhân.",
     "• <b>KPI Live</b>: xem điểm realtime phòng Hà Nội.",
+    "• <b>KPI Deploy Live</b>: xem PYC hợp lệ theo tháng 2026 và tổng KPI Deploy Live.",
     "• <b>Thông báo Hermes</b>: tự báo khi có thông báo mới hoặc phiếu yêu cầu đổi trạng thái, không báo trùng.",
     "",
     "⌨️ <b>LỆNH NHANH</b>",
@@ -1137,16 +1171,17 @@ async function buildDutyScheduleReminderText(date, reasonLabel) {
   const accounts = await getAllHermesAccounts({ secret: config.botSecretKey });
   const mentionLines = formatDutyMatchedMentions(result, accounts);
   const mentionSection = mentionLines.length
-    ? ["✅ <b>BẠN CÓ LỊCH TRỰC</b>", ...mentionLines, "━━━━━━━━━━━━━━━━━━━━"]
-    : [];
+    ? ["✅ <b>BẠN CÓ LỊCH TRỰC</b>", ...mentionLines]
+    : ["📭 <b>BẠN KHÔNG CÓ LỊCH TRỰC</b>", "Bạn không có lịch trực trong ngày này."];
   const dateLabel = new Intl.DateTimeFormat("vi-VN", { dateStyle: "full", timeZone: config.timezoneId }).format(date);
   return [
     "🔔 <b>NHẮC LỊCH TRỰC</b>",
     `⏰ <b>Mốc nhắc:</b> ${escapeHtml(reasonLabel)}`,
     `${ICON.calendar} <b>Ngày trực:</b> <code>${escapeHtml(dateLabel)}</code>`,
     "━━━━━━━━━━━━━━━━━━━━",
-    ...mentionSection,
-    formatDutyScheduleHtml(result, "")
+    formatDutyScheduleHtml(result, "", { includePersonalSection: false }),
+    "────────────────────",
+    ...mentionSection
   ].join("\n");
 }
 
@@ -1376,6 +1411,241 @@ async function showWorkSchedule(ctx, date = new Date()) {
     await replyFresh(ctx, formatWorkScheduleResult(result), {
       parse_mode: "HTML",
       ...workScheduleKeyboard(result, cacheKey)
+    });
+  } finally {
+    await deleteTempMessage(ctx, loadingMessageId);
+  }
+}
+
+function requestOrderMonthDisplayValue(value) {
+  const text = String(value ?? "").trim();
+  return text || "---";
+}
+
+function requestOrderCustomerName(order = {}) {
+  return requestOrderMonthDisplayValue(order.customerName || order.storeName || order.brandName || order.contactName || order.partnerName || order.companyName);
+}
+
+function requestOrderTypeName(order = {}) {
+  const raw = String(order.type || "").trim();
+  const map = {
+    CONTRACT_ONLY: "Hợp đồng",
+    CONTRACT_AND_DEPLOY: "Hợp đồng & triển khai",
+    INVOICE_AND_DEPLOY: "Phiếu thu & triển khai",
+    ADJUST: "Hiệu chỉnh",
+    MAINTENANCE: "Bảo trì",
+    EXTRA_DEPLOY: "Triển khai thêm",
+    DEPLOY_EXTRA: "Triển khai thêm",
+    ONSITE: "Onsite",
+    REMOTE: "Từ xa",
+    DEPLOY: "Triển khai",
+    FURTHER_DEPLOY: "Hỗ trợ tiếp",
+    INVOICE: "Phiếu thu"
+  };
+  return requestOrderMonthDisplayValue(map[raw] || raw || order.requestOrderTypeName || order.typeName);
+}
+
+function requestOrderCreatedDate(order = {}) {
+  const raw = order.createdTime || order.createdAt || order.createTime || order.createdDate;
+  if (!raw) return "---";
+  const text = String(raw).trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}${match[4] ? ` ${match[4]}` : ""}`;
+  return text;
+}
+
+function tableCell(value, width) {
+  const text = requestOrderMonthDisplayValue(value).replace(/\s+/g, " ").trim();
+  const normalized = text.length > width ? `${text.slice(0, Math.max(0, width - 1))}…` : text;
+  return normalized.padEnd(width, " ");
+}
+
+const REQUEST_ORDER_KPI_ITEMS = [
+  { key: "POS", label: "POS", icon: ICON.desktop, kpi: 6 },
+  { key: "FABI", label: "FABi", icon: ICON.sandwich, kpi: 6 },
+  { key: "CRM", label: "CRM", icon: ICON.customer, kpi: 3 },
+  { key: "BK", label: "BK", icon: ICON.notebook, kpi: 3 },
+  { key: "CALL", label: "Call", icon: ICON.phone, kpi: 3 },
+  { key: "WO", label: "WO", icon: ICON.tools, kpi: 3 },
+  { key: "O2O", label: "O2O", icon: ICON.globe, kpi: 3 },
+  { key: "HUB", label: "Hub", icon: ICON.plug, kpi: 1 },
+  { key: "HDDT", label: "HDDT", icon: ICON.receipt, kpi: 1.5 },
+  { key: "FOODHUB", label: "FoodHub", icon: ICON.noon, kpi: 1.5 },
+  { key: "EXTRA_DEPLOY", label: "Triển khai thêm", icon: ICON.plus, kpi: 3 },
+  { key: "ONSITE_TX", label: "Onsite TX", icon: ICON.home, kpi: 1.5 },
+  { key: "ONSITE_NT", label: "Onsite NT", icon: ICON.location, kpi: 3 },
+  { key: "MAINTENANCE", label: "Bảo trì", icon: ICON.wrench, kpi: 3 }
+];
+
+function normalizeRequestOrderKpiText(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+}
+
+function requestOrderDetailText(order = {}) {
+  const details = Array.isArray(order.details) ? order.details : Array.isArray(order.requestOrderDetails) ? order.requestOrderDetails : [];
+  return [
+    order.type,
+    order.productCode,
+    order.productName,
+    order.deploymentType,
+    ...details.flatMap((detail) => [detail?.serviceCode, detail?.serviceName, detail?.productCode, detail?.SKU])
+  ].filter(Boolean).join(" | ");
+}
+
+function classifyRequestOrderKpi(order = {}) {
+  const type = String(order.type || "").toUpperCase();
+  const productCode = String(order.productCode || "").toUpperCase();
+  const haystack = normalizeRequestOrderKpiText(requestOrderDetailText(order));
+  if (type === "MAINTENANCE" || /BAO TRI|MAINTENANCE/.test(haystack)) return "MAINTENANCE";
+  if (type === "EXTRA_DEPLOY" || type === "DEPLOY_EXTRA" || /EXTRA_SERVICE|TRIEN KHAI THEM|MO RONG/.test(haystack)) return "EXTRA_DEPLOY";
+  if (type === "ONSITE") {
+    if (/TU XA|ONLINE|REMOTE|TX/.test(haystack)) return "ONSITE_TX";
+    return "ONSITE_NT";
+  }
+  if (/FOODHUB|FOOD_HUB/.test(haystack)) return "FOODHUB";
+  if (/HOA DON DIEN TU|HDDT|DVHOADONDIENTU|MINVOICE|EINVOICE|E-INVOICE/.test(haystack)) return "HDDT";
+  if (/O2O|ONLINE TO OFFLINE/.test(haystack)) return "O2O";
+  if (/\bHUB\b|IPOSHUB/.test(haystack)) return "HUB";
+  if (/\bWO\b|WORK ORDER/.test(haystack)) return "WO";
+  if (/\bCALL\b|CALLCENTER|CALL CENTER/.test(haystack)) return "CALL";
+  if (/\bBK\b|BOOKING/.test(haystack)) return "BK";
+  if (productCode === "CRM" || /\bCRM\b|SPF/.test(haystack)) return "CRM";
+  if (productCode === "FABI" || /\bFABI\b|FABI_SUB|FBPKT/.test(haystack)) return "FABI";
+  if (/\bPOS\b|IPOS|IPOS_PC|IPOS_SUB/.test(haystack)) return "POS";
+  return "OTHER";
+}
+
+function buildRequestOrderKpiSummary(items = []) {
+  const map = new Map(REQUEST_ORDER_KPI_ITEMS.map((item) => [item.key, { ...item, count: 0, total: 0 }]));
+  const other = { key: "OTHER", label: "Chưa map", kpi: 0, count: 0, total: 0 };
+  for (const order of items) {
+    const key = classifyRequestOrderKpi(order);
+    const target = map.get(key) || other;
+    target.count += 1;
+    target.total = target.count * target.kpi;
+  }
+  const rows = [...map.values()].filter((item) => item.count > 0);
+  if (other.count > 0) rows.push(other);
+  const totalKpi = rows.reduce((sum, item) => sum + item.total, 0);
+  return { rows, totalKpi };
+}
+
+function formatKpiNumber(value) {
+  const number = Number(value || 0);
+  return Number.isInteger(number) ? String(number) : number.toFixed(1);
+}
+
+function formatRequestOrderKpiSummary(result = {}) {
+  const summary = buildRequestOrderKpiSummary(Array.isArray(result.items) ? result.items : []);
+  const monthLabel = result.label || String(result.month || "").replace("_", "/");
+  const deployKpiTarget = 65;
+  const deployKpiRate = deployKpiTarget > 0 ? Math.min((summary.totalKpi / deployKpiTarget) * 100, 120) : 0;
+  const rows = summary.rows.length
+    ? summary.rows.map((item) => [
+      item.label,
+      formatKpiNumber(item.count),
+      formatKpiNumber(item.kpi),
+      formatKpiNumber(item.total)
+    ])
+    : [["-", "0", "0", "0"]];
+  const widths = [20, 6, 6, 7];
+  const borderTop = `┌${"─".repeat(widths[0])}┬${"─".repeat(widths[1])}┬${"─".repeat(widths[2])}┬${"─".repeat(widths[3])}┐`;
+  const borderMid = `├${"─".repeat(widths[0])}┼${"─".repeat(widths[1])}┼${"─".repeat(widths[2])}┼${"─".repeat(widths[3])}┤`;
+  const borderBottom = `└${"─".repeat(widths[0])}┴${"─".repeat(widths[1])}┴${"─".repeat(widths[2])}┴${"─".repeat(widths[3])}┘`;
+  const tableLines = [
+    borderTop,
+    `│${padRight("Sản phẩm", widths[0])}│${padLeft("Phiếu", widths[1])}│${padLeft("KPI", widths[2])}│${padLeft("Tổng", widths[3])}│`,
+    borderMid,
+    ...rows.map(([label, count, kpi, total]) => `│${padRight(label, widths[0])}│${padLeft(count, widths[1])}│${padLeft(kpi, widths[2])}│${padLeft(total, widths[3])}│`),
+    borderBottom
+  ];
+  return [
+    `${ICON.total} <b>TỔNG KẾT KPI DEPLOY LIVE</b>`,
+    `<b>THÁNG ${escapeHtml(monthLabel)}</b>`,
+    "",
+    `<pre>${escapeHtml(tableLines.join("\n"))}</pre>`,
+    "",
+    "━━━━━━━━━━━━━━━━━━━━",
+    `${ICON.kpi} <b>Tổng KPI triển khai:</b> <b>${escapeHtml(formatKpiNumber(summary.totalKpi))}</b> / ${escapeHtml(formatKpiNumber(deployKpiTarget))}`,
+    `${ICON.upTrend} <b>Tỷ lệ KPI triển khai:</b> <b>${escapeHtml(deployKpiRate.toFixed(1))}%</b>`
+  ].join("\n");
+}
+
+function formatRequestOrderMonthListChunks(result = {}) {
+  const monthLabel = result.label || String(result.month || "").replace("_", "/");
+  const title = `${ICON.receipt} PYC tháng ${monthLabel} — ${result.count ?? 0} phiếu`;
+  const tableHeader = [
+    tableCell("STT", 4),
+    tableCell("Mã PYC", 10),
+    tableCell("Khách hàng", 28),
+    tableCell("Loại phiếu", 22),
+    tableCell("Ngày tạo", 16)
+  ].join(" ");
+  const separator = "─".repeat(86);
+  const header = `${escapeHtml(title)}\n<pre>${escapeHtml(tableHeader)}\n${separator}`;
+  const chunks = [];
+  let current = header;
+  const items = Array.isArray(result.items) ? result.items : [];
+  if (!items.length) {
+    return [`${header}\n${escapeHtml("Không có PYC hợp lệ trong tháng này.")}\n</pre>`];
+  }
+  items.forEach((order, index) => {
+    const line = [
+      tableCell(index + 1, 4),
+      tableCell(order.roCode || order.code, 10),
+      tableCell(requestOrderCustomerName(order), 28),
+      tableCell(requestOrderTypeName(order), 22),
+      tableCell(requestOrderCreatedDate(order), 16)
+    ].join(" ");
+    const escapedLine = escapeHtml(line);
+    if (`${current}\n${escapedLine}\n</pre>`.length > 3600) {
+      chunks.push(`${current}\n</pre>`);
+      current = `<pre>${escapeHtml(tableHeader)}\n${separator}\n${escapedLine}`;
+    } else {
+      current = `${current}\n${escapedLine}`;
+    }
+  });
+  if (current) chunks.push(`${current}\n</pre>`);
+  return chunks;
+}
+
+async function sendRequestOrderMonthList(ctx, month) {
+  const account = await getHermesAccountOrReply(ctx);
+  if (!account) return;
+
+  const loadingMessageId = await sendTempMessage(ctx, `Đang tổng hợp PYC hợp lệ tháng ${String(month).replace("_", "/")}...`);
+  try {
+    const result = await enqueue(() => getRequestOrderMonthList({
+      username: account.hermesUsername,
+      password: account.hermesPassword,
+      month,
+      storageState: account.hermesSession || null
+    }));
+    if (result.sessionExpired) await clearHermesSession(ctx.chat.id);
+    if (result.otpRequired) {
+      pendingActions.set(ctx.chat.id, { stage: "hermes_otp" });
+      await replyFresh(ctx, "Hermes yêu cầu OTP. Sếp gửi mã OTP mới nhất rồi bấm kéo PYC lại nhé. /cancel để huỷ.");
+      return;
+    }
+    if (!result.ok) {
+      await replyFresh(ctx, `Không kéo được PYC tháng.\n${String(result.message || "Lỗi Hermes").slice(0, 700)}`, requestOrderMonthKeyboard());
+      return;
+    }
+    if (result.storageState) {
+      await saveHermesSession({ secret: config.botSecretKey, chatId: ctx.chat.id, storageState: result.storageState });
+    }
+    await deleteTempMessage(ctx, loadingMessageId);
+    await deleteLastBotMessage(ctx);
+    const chunks = formatRequestOrderMonthListChunks(result);
+    for (let index = 0; index < chunks.length; index += 1) {
+      await ctx.reply(chunks[index], { parse_mode: "HTML" });
+    }
+    await ctx.reply(formatRequestOrderKpiSummary(result), {
+      parse_mode: "HTML",
+      ...requestOrderSummaryKeyboard()
     });
   } finally {
     await deleteTempMessage(ctx, loadingMessageId);
@@ -2289,6 +2559,20 @@ bot.action("action:duty_menu", async (ctx) => {
   });
 });
 
+bot.action("action:request_order_month_menu", async (ctx) => {
+  await ctx.answerCbQuery();
+  await replyFresh(ctx, `${ICON.deploy} <b>KPI Deploy Live 2026</b>\nChọn tháng để xem danh sách PYC hợp lệ và tổng KPI Deploy Live. Tháng tương lai sẽ tự mở khi đến tháng.`, {
+    parse_mode: "HTML",
+    ...requestOrderMonthKeyboard()
+  });
+});
+
+bot.action(/^action:request_order_month:(\d{4}_\d{2})$/, async (ctx) => {
+  const month = ctx.match?.[1];
+  await ctx.answerCbQuery("Đang lấy PYC tháng...");
+  await sendRequestOrderMonthList(ctx, month);
+});
+
 bot.action("action:hermes_account_menu", async (ctx) => {
   await ctx.answerCbQuery();
   const account = await getHermesAccount({ secret: config.botSecretKey, chatId: ctx.chat.id });
@@ -2822,9 +3106,6 @@ process.once("SIGTERM", async () => {
   bot.stop("SIGTERM");
   await releaseInstanceLock();
 });
-
-
-
 
 
 

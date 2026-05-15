@@ -1,6 +1,6 @@
 # Hermes Telegram Bot
 
-Bot Telegram cho Hermes: lich lam viec, lich truc, KPI, doanh thu phong, dashboard hang ngay, thong bao phieu moi, backup va version hoa khi update.
+Bot Telegram cho Hermes: lich lam viec, lich truc, KPI, KPI Deploy Live, doanh thu phong, dashboard hang ngay, thong bao phieu moi, backup va version hoa khi update.
 
 ## 0. So Do Luong Hoat Dong
 
@@ -11,9 +11,11 @@ flowchart TD
   C --> D[Lich truc Google Sheet]
   C --> E[Hermes Web/API]
   C --> F[KPI / Doanh thu]
+  C --> R[KPI Deploy Live]
   D --> G[UI text + icon chung: src/ui.js]
   E --> G
   F --> G
+  R --> G
   G --> H[Telegram Message]
 
   I[Auto Scheduler] --> J[07:00 / 11:00 / 17:00 nhac lich truc]
@@ -230,6 +232,7 @@ pm2 save
 - `/truc mai`: lich truc ngay mai.
 - `/kpi`: KPI thang/nam.
 - `/pointkpi`: KPI Live, hien thi tong diem, ngay xem, thoi gian xem va bang xep hang phong Ha Noi.
+- Nut `KPI Deploy Live`: chon thang 2026, doc PYC hop le va tinh tong KPI Deploy Live.
 - `/sethermes`: luu/cap nhat tai khoan Hermes.
 - `/deletehermes`: xoa tai khoan Hermes.
 - `/id`: xem Telegram ID.

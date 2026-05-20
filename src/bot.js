@@ -1,4 +1,6 @@
 ﻿import net from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Markup, Telegraf } from "telegraf";
 
 import { getAllowedTelegramIds, isAuthorizedTelegramId } from "./access.js";
@@ -3283,23 +3285,31 @@ function startSchedulers() {
   });
 }
 
-acquireInstanceLock()
-  .then(() => {
+export async function startBot() {
+  await acquireInstanceLock();
+  try {
     startSchedulers();
-    return bot.launch();
-  })
-  .then(async () => {
+    await bot.launch();
     console.log("Hermes schedule Telegram bot is running.");
     syncTelegramCommandMenu().catch(console.error);
     if (config.startupNotify) {
-      notifyAllowedUsers("Bot l?ch Hermes ?? kh?i ??ng OK.").catch(console.error);
+      notifyAllowedUsers("Bot lịch Hermes đã khởi động OK.").catch(console.error);
     }
-  })
-  .catch(async (error) => {
+  } catch (error) {
+    console.error("Cannot launch Hermes schedule bot:", error);
+    await releaseInstanceLock();
+    process.exit(1);
+  }
+}
+
+const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isMainModule) {
+  startBot().catch(async (error) => {
     console.error("Cannot launch Hermes schedule bot:", error);
     await releaseInstanceLock();
     process.exit(1);
   });
+}
 
 process.once("SIGINT", async () => {
   for (const timer of cronJobs) clearInterval(timer);

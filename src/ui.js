@@ -68,6 +68,7 @@
 export const TEXT = Object.freeze({
   button: Object.freeze({
     account: "Tài khoản Hermes",
+    back: "Quay lại",
     backToList: "Quay lại danh sách",
     chooseDate: "Chọn ngày",
     currentUser: "Xem thông tin",

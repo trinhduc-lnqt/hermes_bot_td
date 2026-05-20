@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+﻿import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { chromium } from "playwright";
@@ -8,6 +8,8 @@ import { config } from "./config.js";
 // KPI ???c trực tiếp từ Google Sheet (không cần local API server)
 const KPI_SHEET_ID = process.env.KPI_SHEET_ID || "14mLSjz6oU6QLVWi5PeNabRFSKmhAtLB6HZnT0M7T9uo";
 const HAN_SUPPORT_EMPLOYEE_CACHE_FILE = path.resolve("data/han-support-employees.json");
+const HOTLINE_KPI_TARGET = 135;
+const SUPPORT_TICKET_KPI_POINT = 0.5;
 
 const USERNAME_SELECTORS = [
   "#txtuserid",
@@ -241,21 +243,19 @@ function createApiCapture(page) {
   const apiResponses = [];
   page.on("response", async (response) => {
     const url = response.url();
-    if (!url.includes("/api/")) {
-      return;
-    }
-    if (response.request().resourceType() === "fetch" && !/\/api\/request-order\/get|\/api\/user\/(pre-login|get-otp|verify|login)/i.test(url)) {
+    if (!url.includes("/api/") && !/support-care|care-detail|support-log/i.test(url)) {
       return;
     }
     const request = response.request();
     let body = "";
     const contentType = response.headers()["content-type"] || "";
-    if ((response.request().resourceType() !== "fetch" && contentType.includes("json")) || /\/api\/user\/(pre-login|get-otp|verify|login)/i.test(url) || /\/api\/support-online\/working-schedule\/list/i.test(url) || /\/api\/request-order\/get/i.test(url) || /\/api\/notify\/get/i.test(url) || /kpi-support|report-kpi-support|manage-employee|employee/i.test(url)) {
+    if (contentType.includes("json") || /\/api\/user\/(pre-login|get-otp|verify|login)/i.test(url) || /\/api\/support-online\/working-schedule\/list/i.test(url) || /\/api\/request-order\/get/i.test(url) || /\/api\/notify\/get/i.test(url) || /kpi-support|report-kpi-support|support-care|care-detail|support-log|manage-employee|employee/i.test(url)) {
       body = await response.text().catch(() => "");
     }
     apiResponses.push({
       url,
       method: request.method(),
+      requestHeaders: request.headers(),
       status: response.status(),
       requestBody: request.postData() || "",
       body
@@ -2713,6 +2713,71 @@ function normalizeKpiSupportText(value = "") {
   return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[_\s-]+/g, " ").trim();
 }
 
+function flattenSupportCareItems(value, output = []) {
+  if (!value) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) flattenSupportCareItems(item, output);
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  const keys = Object.keys(value);
+  const hasTicketShape = keys.some((key) => /ticket|support|care|request|order|code|id/i.test(key));
+  if (hasTicketShape) output.push(value);
+  for (const key of keys) {
+    if (/data|items|rows|list|result|records|details/i.test(key)) flattenSupportCareItems(value[key], output);
+  }
+  return output;
+}
+
+function pickSupportCareTicketId(item = {}) {
+  const direct = pickKpiSupportTextDeep(item, ["ticket", "ticket id", "ticket code", "request code", "request order", "code", "ma phieu", "so phieu"]);
+  if (direct) return direct;
+  const text = JSON.stringify(item || {});
+  return text.match(/#?\d{5,}/)?.[0] || "";
+}
+
+function matchesSupportCareViewer(value = "", username = "") {
+  const alias = getSupportAlias(username);
+  if (!alias) return false;
+  const normalized = normalizeKpiSupportText(value);
+  return normalized.includes(normalizeKpiSupportText(username)) || normalized.includes(alias);
+}
+
+function normalizeSupportCareRecord(item = {}, username = "") {
+  const text = JSON.stringify(item || {});
+  const product = pickKpiSupportTextDeep(item, ["product", "product code", "product name", "san pham", "sản phẩm", "module", "service"]) || "Support";
+  const count = pickKpiSupportNumber(item, ["total", "tong", "count", "so luong", "quantity", "ticket", "phiếu", "phieu"]) || 1;
+  return {
+    ticketId: pickSupportCareTicketId(item) || product,
+    product,
+    count,
+    matchesViewer: matchesSupportCareViewer(text, username),
+    sourceText: text
+  };
+}
+
+function buildSupportCareRows(records = [], username = "") {
+  const hasViewerMatches = records.some((item) => item.matchesViewer);
+  const scopedRecords = hasViewerMatches || username ? records.filter((item) => item.matchesViewer) : records;
+  const groups = new Map();
+  scopedRecords.forEach((item, index) => {
+    const ticketId = String(item.ticketId || `row-${index}`).trim();
+    if (!ticketId) return;
+    const label = String(item.product || "Support").trim() || "Support";
+    if (!groups.has(label)) groups.set(label, new Set());
+    const count = Math.max(1, Number(item.count || 1));
+    for (let number = 0; number < count; number += 1) {
+      groups.get(label).add(count > 1 ? `${ticketId}-${number}` : ticketId);
+    }
+  });
+  return [...groups.entries()].map(([label, tickets]) => ({
+    label,
+    count: tickets.size,
+    kpi: SUPPORT_TICKET_KPI_POINT,
+    total: tickets.size * SUPPORT_TICKET_KPI_POINT
+  })).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+}
+
 function pickKpiSupportNumber(item = {}, patterns = []) {
   for (const [key, value] of Object.entries(item || {})) {
     const normalizedKey = normalizeKpiSupportText(key);
@@ -2808,6 +2873,19 @@ function getSupportAlias(value = "") {
   return String(value || "").trim().toLowerCase().replace(/@ipos\.vn$/i, "");
 }
 
+function normalizeHanSupportTeamName(value = "") {
+  const normalized = String(value || "").trim();
+  const teams = {
+    "5fe9bcb15885324fa7a01a02": "HAN Sucker",
+    "5fe9bd5e5885324fa7a01a0a": "HAN Glory"
+  };
+  return teams[normalized] || normalized;
+}
+
+function isKnownHanSupportKpiTeam(value = "") {
+  return /han\s+(sucker|glory)/i.test(String(value || ""));
+}
+
 function normalizeEmployeeNameRecord(item = {}) {
   const text = JSON.stringify(item || {});
   const email = pickKpiSupportTextDeep(item, ["email", "mail", "username", "user name", "account", "login"]) || findSupportTextFromSource(text);
@@ -2849,6 +2927,19 @@ async function readHanSupportEmployeeCache() {
       .map(normalizeHanSupportEmployeeCacheItem)
       .filter(Boolean)
       .map((item) => [item.alias, item.name]));
+  } catch {
+    return new Map();
+  }
+}
+
+async function readHanSupportEmployeeInfoMap() {
+  try {
+    const data = JSON.parse(await readFile(HAN_SUPPORT_EMPLOYEE_CACHE_FILE, "utf8"));
+    const items = Array.isArray(data.employees) ? data.employees : [];
+    return new Map(items
+      .map(normalizeHanSupportEmployeeCacheItem)
+      .filter(Boolean)
+      .map((item) => [item.alias, item]));
   } catch {
     return new Map();
   }
@@ -2956,11 +3047,11 @@ function normalizeKpiSupportItem(item = {}) {
     support,
     supportName,
     level: pickKpiSupportText(item, ["level", "rank", "position level"]),
-    team: pickKpiSupportText(item, ["team", "group", "support team"]),
+    team: normalizeHanSupportTeamName(pickKpiSupportText(item, ["team", "group", "support team"])),
     department: pickKpiSupportText(item, ["dept", "department", "room", "branch", "phong", "phòng"]),
     pointKpi: pickKpiSupportNumber(item, ["point kpi", "kpi point", "pointkpi", "point"]),
-    pointSupport: pickKpiSupportNumber(item, ["point support", "support point", "pointsupport"]),
-    pointTotal: pickKpiSupportNumber(item, ["total point", "point total", "tong point", "point salary", "pointsalary", "point"]),
+    pointSupport: pickKpiSupportNumber(item, ["point support", "support point", "pointsupport", "bonus point", "bonuspoint"]),
+    pointTotal: pickKpiSupportNumber(item, ["total point", "totalpoint", "point total", "pointtotal", "tong point", "point salary", "pointsalary"]),
     kpi: pickKpiSupportNumber(item, ["kpi"]),
     sourceText: text
   };
@@ -2978,31 +3069,287 @@ function parseKpiSupportNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function getKpiSupportMonthPreset(month = null, now = new Date()) {
+  if (!/^\d{4}_\d{2}$/.test(String(month || ""))) return "";
+  const [year, monthNumber] = String(month).split("_").map(Number);
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const previous = new Date(currentYear, currentMonth - 2, 1);
+  if (year === currentYear && monthNumber === currentMonth) return "this-month";
+  if (year === previous.getFullYear() && monthNumber === previous.getMonth() + 1) return "last-month";
+  return "custom";
+}
+
+async function clickKpiSupportFilterButton(page) {
+  await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const button = buttons.find((item) => {
+      const rect = item.getBoundingClientRect();
+      return rect.x > 220 && rect.x < 420 && rect.y > 60 && rect.y < 150 && rect.width >= 60 && rect.width <= 160;
+    });
+    button?.click();
+  }).catch(() => {});
+  await page.waitForTimeout(600);
+}
+
+async function chooseKpiSupportMonthPreset(page, preset) {
+  if (!preset || preset === "custom") return false;
+  const selected = await page.evaluate((targetPreset) => {
+    const dateInput = Array.from(document.querySelectorAll("input"))
+      .find((item) => {
+        const rect = item.getBoundingClientRect();
+        return rect.x > 400 && rect.x < 730 && rect.y > 380 && rect.y < 480 && rect.width > 100;
+      });
+    dateInput?.click();
+    return Boolean(dateInput);
+  }, preset).catch(() => false);
+  if (!selected) return false;
+  await page.waitForTimeout(500);
+  const clicked = await page.evaluate((targetPreset) => {
+    const normalize = (value = "") => String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const target = targetPreset === "last-month" ? "thang truoc" : "thang nay";
+    const options = Array.from(document.querySelectorAll("li,[role='option'],button,span,div"));
+    const option = options.find((item) => {
+      const rect = item.getBoundingClientRect();
+      const text = normalize(item.textContent || "");
+      return rect.width > 0 && rect.height > 0 && text === target;
+    });
+    option?.click();
+    return Boolean(option);
+  }, preset).catch(() => false);
+  await page.waitForTimeout(500);
+  return clicked;
+}
+
+async function submitKpiSupportFilter(page) {
+  await page.evaluate(() => {
+    const normalize = (value = "") => String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const button = buttons.find((item) => {
+      const rect = item.getBoundingClientRect();
+      const text = normalize(item.textContent || "");
+      return rect.width > 50 && rect.height > 25 && /tim kiem|search/.test(text);
+    });
+    button?.click();
+  }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+}
+
+function getHermesMonthRange(month = null) {
+  const target = /^\d{4}_\d{2}$/.test(String(month || "")) ? String(month) : "";
+  const now = new Date();
+  const year = target ? Number(target.split("_")[0]) : now.getFullYear();
+  const monthNumber = target ? Number(target.split("_")[1]) : now.getMonth() + 1;
+  const lastDay = new Date(year, monthNumber, 0).getDate();
+  const monthText = String(monthNumber).padStart(2, "0");
+  return {
+    label: `${monthNumber}/${year}`,
+    startDate: `${year}-${monthText}-01 00:00:00`,
+    endDate: `${year}-${monthText}-${String(lastDay).padStart(2, "0")} 23:59:59`
+  };
+}
+
+async function fetchHermesReportJson(page, apiResponses = [], apiPath, month = null) {
+  const range = getHermesMonthRange(month);
+  const captured = [...(apiResponses || [])].reverse().find((response) => String(response.url || "").includes(apiPath) && response.requestHeaders?.authorization);
+  const headers = {
+    ...(captured?.requestHeaders || {}),
+    accept: "application/json, text/plain, */*",
+    server: "LIVE"
+  };
+  delete headers.host;
+  delete headers["content-length"];
+  const url = `/api/report/${apiPath}?page=0&startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}`;
+  const result = await page.evaluate(async ({ url, headers }) => {
+    const response = await fetch(url, { headers });
+    return { ok: response.ok, status: response.status, text: await response.text() };
+  }, { url, headers }).catch((error) => ({ ok: false, status: 0, text: error.message }));
+  if (!result.ok) return { ok: false, range, message: `API ${apiPath} lỗi ${result.status}: ${String(result.text || "").slice(0, 300)}` };
+  try {
+    return { ok: true, range, json: JSON.parse(result.text || "{}") };
+  } catch {
+    return { ok: false, range, message: `API ${apiPath} trả dữ liệu không hợp lệ.` };
+  }
+}
+
 async function applyKpiSupportMonthFilter(page, month = null) {
   if (!/^\d{4}_\d{2}$/.test(String(month || ""))) return "";
   const [year, monthNumber] = String(month).split("_");
   const monthLabel = `${Number(monthNumber)}/${year}`;
-  await page.getByText("Lọc").first().click().catch(() => {});
-  await page.waitForTimeout(500);
-  const input = page.locator("input").first();
-  if (await input.isVisible().catch(() => false)) {
-    await input.fill(monthLabel).catch(async () => {
-      await input.click().catch(() => {});
-      await page.keyboard.press("Control+A").catch(() => {});
-      await page.keyboard.type(monthLabel).catch(() => {});
-    });
-    await page.keyboard.press("Enter").catch(() => {});
+  const preset = getKpiSupportMonthPreset(month);
+  await clickKpiSupportFilterButton(page);
+  const presetApplied = await chooseKpiSupportMonthPreset(page, preset);
+  if (!presetApplied && preset !== "this-month") {
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(300);
   }
-  await page.getByRole("button", { name: /lọc|filter|áp dụng|apply/i }).last().click().catch(() => {});
-  await page.waitForTimeout(3000);
+  await submitKpiSupportFilter(page);
   return monthLabel;
 }
-
-async function readKpiSupportRealtimeFromPage(page, apiResponses, month = null) {
-  const url = "https://hermes.ipos.vn/report-kpi-support";
+async function readSupportCareMonthlySummary(page, apiResponses = [], month = null, username = "") {
+  const url = "https://hermes.ipos.vn/report-support-log-by-product";
+  const responseStartIndex = Array.isArray(apiResponses) ? apiResponses.length : 0;
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(5000);
-  const monthLabel = await applyKpiSupportMonthFilter(page, month);
+  const directReport = await fetchHermesReportJson(page, apiResponses, "get-report-support-log-by-product", month);
+  const monthLabel = directReport.range?.label || getHermesMonthRange(month).label;
+  const apiItems = [];
+  const directData = Array.isArray(directReport.json?.data) ? directReport.json.data : [];
+  if (directReport.ok) {
+    flattenSupportCareItems(directReport.json, apiItems);
+  } else {
+    const recentResponses = (apiResponses || []).slice(responseStartIndex);
+    for (const response of recentResponses) {
+      if (!/report-support-log-by-product|support-log|support-care|care-detail/i.test(response.url || "") || !response.body) continue;
+      try {
+        flattenSupportCareItems(JSON.parse(response.body), apiItems);
+      } catch {}
+    }
+  }
+  const domResult = await page.evaluate((viewer) => {
+    const normalize = (value = "") => String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[_\s-]+/g, " ").trim();
+    const parseNumber = (value = "") => {
+      const text = String(value || "").trim();
+      if (!/^[-+]?\d+([.,]\d+)?$/.test(text)) return 0;
+      const number = Number(text.replace(/,/g, ""));
+      return Number.isFinite(number) ? number : 0;
+    };
+    const alias = String(viewer || "").trim().toLowerCase().replace(/@ipos\.vn$/i, "");
+    const table = document.querySelector("table") || document.querySelector("[role='table']");
+    const rawRows = Array.from((table || document).querySelectorAll("tr, .mat-row, .mat-header-row, [role='row']"));
+    const occupied = [];
+    const grid = [];
+    rawRows.forEach((row, rowIndex) => {
+      const cells = Array.from(row.querySelectorAll("th,td,.mat-cell,.mat-header-cell,[role='cell'],[role='columnheader']"));
+      if (!cells.length) return;
+      grid[rowIndex] = grid[rowIndex] || [];
+      occupied[rowIndex] = occupied[rowIndex] || [];
+      let columnIndex = 0;
+      cells.forEach((cell) => {
+        while (occupied[rowIndex][columnIndex]) columnIndex += 1;
+        const text = cell.textContent.trim();
+        const colspan = Math.max(1, Number(cell.getAttribute("colspan") || cell.colSpan || 1));
+        const rowspan = Math.max(1, Number(cell.getAttribute("rowspan") || cell.rowSpan || 1));
+        for (let rowOffset = 0; rowOffset < rowspan; rowOffset += 1) {
+          const targetRow = rowIndex + rowOffset;
+          grid[targetRow] = grid[targetRow] || [];
+          occupied[targetRow] = occupied[targetRow] || [];
+          for (let columnOffset = 0; columnOffset < colspan; columnOffset += 1) {
+            const targetColumn = columnIndex + columnOffset;
+            if (rowOffset === 0) grid[targetRow][targetColumn] = text;
+            occupied[targetRow][targetColumn] = true;
+          }
+        }
+        columnIndex += colspan;
+      });
+    });
+    const tableRows = grid.filter((cells) => Array.isArray(cells) && cells.some((cell) => String(cell || "").trim()));
+    const headerRows = tableRows.filter((cells) => !cells.some((cell) => /@ipos\.vn/i.test(cell)));
+    const productHeader = [...headerRows].reverse().find((cells) => cells.some((cell) => /fabi|ipos|crm|hub|khac|kh?c|hermes|momo|web|pop|bank|invoice/i.test(cell || ""))) || [];
+    const buildRowSummary = (supportCells) => {
+      const supportText = String(supportCells.find((cell) => /@ipos\.vn/i.test(cell)) || supportCells[0] || "").trim();
+      const support = supportText.match(/[A-Z0-9._%+-]+@ipos\.vn/i)?.[0] || supportText.split(/\s+/)[0] || "---";
+      const records = [];
+      let totalFromColumn = 0;
+      for (let index = 1; index < supportCells.length; index += 1) {
+        const count = parseNumber(supportCells[index]);
+        if (count <= 0) continue;
+        const label = String(productHeader[index] || "").trim();
+        const normalizedLabel = normalize(label);
+        if (!label || /^\d+([.,]\d+)?$/.test(label)) continue;
+        if (/^(medium|hard)$/.test(normalizedLabel)) continue;
+        if (/^(tong|total)$/.test(normalizedLabel)) {
+          totalFromColumn = count;
+          continue;
+        }
+        records.push({
+          ticketId: `${support}-${label}-${index}`,
+          support,
+          product: label,
+          count,
+          matchesViewer: true,
+          sourceText: supportCells.join(" | ")
+        });
+      }
+      const productTotal = records.reduce((sum, item) => sum + Number(item.count || 0), 0);
+      return { support, records, totalFromColumn: totalFromColumn || productTotal };
+    };
+    const supportRows = tableRows.filter((cells) => /@ipos\.vn/i.test(cells.join(" ")) && /han\s+support/i.test(normalize(cells.join(" "))));
+    const allSupportRows = supportRows.flatMap((cells) => {
+      const summary = buildRowSummary(cells);
+      return summary.records.map((item) => ({
+        support: summary.support,
+        product: item.product,
+        count: item.count,
+        kpi: item.count * 0.5,
+        percent: summary.totalFromColumn ? ((item.count * 0.5) / 135) * 100 : 0,
+        totalTickets: summary.totalFromColumn,
+        sourceText: cells.join(" | ")
+      }));
+    });
+    const viewerRow = supportRows.find((cells) => {
+      const text = normalize(cells.join(" "));
+      return alias && (text.includes(alias) || text.includes(normalize(viewer)));
+    });
+    if (!viewerRow) return { records: [], totalFromColumn: 0, supportRows: allSupportRows };
+    const viewerSummary = buildRowSummary(viewerRow);
+    return { records: viewerSummary.records, totalFromColumn: viewerSummary.totalFromColumn, supportRows: allSupportRows };
+  }, username).catch(() => ({ records: [], totalFromColumn: 0 }));
+  const directRecords = directData.flatMap((item) => {
+    const support = item.employeeEmail || item.support || item.email || "";
+    const details = Array.isArray(item.details) && item.details.length ? item.details : [{ productCode: "Support", quantity: item.total || 0 }];
+    return details.map((detail, index) => ({
+      ticketId: `${support}-${detail.productCode || detail.product || "Support"}-${index}`,
+      support,
+      product: detail.productCode || detail.product || "Support",
+      count: Number(detail.quantity || detail.count || 0),
+      matchesViewer: matchesSupportCareViewer(support, username),
+      sourceText: JSON.stringify(item)
+    })).filter((record) => record.support && record.count > 0);
+  });
+  const directSupportRows = directRecords.map((item) => ({
+    support: item.support,
+    product: item.product,
+    count: item.count,
+    kpi: item.count * SUPPORT_TICKET_KPI_POINT,
+    percent: HOTLINE_KPI_TARGET ? ((item.count * SUPPORT_TICKET_KPI_POINT) / HOTLINE_KPI_TARGET) * 100 : 0,
+    totalTickets: Number(directData.find((row) => row.employeeEmail === item.support)?.total || 0),
+    sourceText: item.sourceText
+  }));
+  const domRecords = !directReport.ok && Array.isArray(domResult.records) ? domResult.records : [];
+  const apiRecords = apiItems.map((item) => normalizeSupportCareRecord(item, username)).filter((item) => item.ticketId);
+  const records = directRecords.length ? directRecords : domRecords.length ? domRecords : apiRecords;
+  const rows = buildSupportCareRows(records, username);
+  const directViewer = directData.find((item) => matchesSupportCareViewer(item.employeeEmail || "", username));
+  const totalTickets = Number(directViewer?.total || 0) > 0
+    ? Number(directViewer.total || 0)
+    : Number(domResult.totalFromColumn || 0) > 0
+    ? Number(domResult.totalFromColumn || 0)
+    : rows.reduce((sum, item) => sum + Number(item.count || 0), 0);
+  const kpi = totalTickets * SUPPORT_TICKET_KPI_POINT;
+  return {
+    url,
+    monthLabel,
+    totalTickets,
+    rows,
+    supportRows: directSupportRows.length ? directSupportRows : Array.isArray(domResult.supportRows) ? domResult.supportRows : [],
+    pointPerTicket: SUPPORT_TICKET_KPI_POINT,
+    kpi,
+    target: HOTLINE_KPI_TARGET,
+    percent: HOTLINE_KPI_TARGET ? (kpi / HOTLINE_KPI_TARGET) * 100 : 0,
+    username,
+    personal: Boolean(username)
+  };
+}
+
+async function readKpiSupportRealtimeFromPage(page, apiResponses, month = null, username = "") {
+  const url = "https://hermes.ipos.vn/report-kpi-support";
+  const responseStartIndex = Array.isArray(apiResponses) ? apiResponses.length : 0;
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(5000);
+  const directReport = await fetchHermesReportJson(page, apiResponses, "get-report-kpi-support", month);
+  const monthLabel = directReport.range?.label || getHermesMonthRange(month).label;
 
   const isLoginPage = page.url().includes("/login") || await page.locator("input[type='password']").isVisible().catch(() => false);
   if (isLoginPage || await hasVisibleOtpInput(page) || !(await isLoggedIn(page))) {
@@ -3010,11 +3357,16 @@ async function readKpiSupportRealtimeFromPage(page, apiResponses, month = null) 
   }
 
   const apiItems = [];
-  for (const response of apiResponses || []) {
-    if (!/kpi-support|report-kpi-support/i.test(response.url || "") || !response.body) continue;
-    try {
-      flattenKpiSupportItems(JSON.parse(response.body), apiItems);
-    } catch {}
+  if (directReport.ok) {
+    flattenKpiSupportItems(directReport.json, apiItems);
+  } else {
+    const recentResponses = (apiResponses || []).slice(responseStartIndex);
+    for (const response of recentResponses) {
+      if (!/kpi-support|report-kpi-support/i.test(response.url || "") || !response.body) continue;
+      try {
+        flattenKpiSupportItems(JSON.parse(response.body), apiItems);
+      } catch {}
+    }
   }
 
   const domRows = await page.evaluate(() => {
@@ -3025,7 +3377,8 @@ async function readKpiSupportRealtimeFromPage(page, apiResponses, month = null) 
   const normalizedApiItems = apiItems
     .map(normalizeKpiSupportItem)
     .filter((item) => isValidKpiSupporter(item.support))
-    .filter(isHanSupportKpiItem);
+    .filter(isHanSupportKpiItem)
+    .filter((item) => isKnownHanSupportKpiTeam(item.team));
   const headerRow = domRows.find((cells) => cells.some((cell) => /support|nhân viên|nhan vien|level|team|phòng|phong|point|kpi/i.test(cell))) || [];
   const findDomIndex = (...patterns) => headerRow.findIndex((cell) => {
     const normalizedCell = normalizeKpiSupportText(cell);
@@ -3051,7 +3404,7 @@ async function readKpiSupportRealtimeFromPage(page, apiResponses, month = null) 
       support,
       supportName,
       level: (looksLikeHermesKpiRow ? cells[1] : "") || (levelIndex >= 0 ? cells[levelIndex] : "") || "",
-      team: (looksLikeHermesKpiRow ? cells[2] : "") || (teamIndex >= 0 ? cells[teamIndex] : "") || "",
+      team: normalizeHanSupportTeamName((looksLikeHermesKpiRow ? cells[2] : "") || (teamIndex >= 0 ? cells[teamIndex] : "") || ""),
       department: (looksLikeHermesKpiRow ? cells[3] : "") || (departmentIndex >= 0 ? cells[departmentIndex] : "") || "HAN_SUPPORT",
       pointKpi,
       pointSupport,
@@ -3061,24 +3414,33 @@ async function readKpiSupportRealtimeFromPage(page, apiResponses, month = null) 
     };
   }).filter(isHanSupportKpiItem)
     .filter((item) => isValidKpiSupporter(item.support))
+    .filter((item) => isKnownHanSupportKpiTeam(item.team))
     .filter((item) => normalizeKpiSupportText(item.support) !== "tong cong");
 
   const employeeNameByAlias = await readHanSupportEmployeeNameMap(page, apiResponses).catch(() => new Map());
+  const employeeInfoByAlias = await readHanSupportEmployeeInfoMap().catch(() => new Map());
   const apiNameByEmail = new Map(normalizedApiItems
     .filter((item) => item.supportName)
     .map((item) => [String(item.support || "").toLowerCase(), item.supportName]));
   const apiNameByAlias = new Map(normalizedApiItems
     .filter((item) => item.supportName)
     .map((item) => [getSupportAlias(item.support), item.supportName]));
-  const applySupportName = (item) => ({
-    ...item,
-    supportName: item.supportName
+  const applySupportName = (item) => {
+    const employeeInfo = employeeInfoByAlias.get(getSupportAlias(item.support));
+    return {
+      ...item,
+      supportName: item.supportName
       || employeeNameByAlias.get(getSupportAlias(item.support))
       || apiNameByEmail.get(String(item.support || "").toLowerCase())
       || apiNameByAlias.get(getSupportAlias(item.support))
-      || ""
-  });
-  const items = domItems.length
+      || "",
+      level: item.level || employeeInfo?.level || "",
+      team: normalizeHanSupportTeamName(item.team || employeeInfo?.teamId || "")
+    };
+  };
+  const items = directReport.ok && normalizedApiItems.length
+    ? normalizedApiItems.map(applySupportName)
+    : domItems.length
     ? domItems.map(applySupportName)
     : normalizedApiItems.map(applySupportName);
   const totals = items.reduce((sum, item) => ({
@@ -3088,10 +3450,28 @@ async function readKpiSupportRealtimeFromPage(page, apiResponses, month = null) 
     kpi: sum.kpi + Number(item.kpi || 0)
   }), { pointKpi: 0, pointSupport: 0, pointTotal: 0, kpi: 0 });
 
+  const supportCare = await readSupportCareMonthlySummary(page, apiResponses, month, username).catch(() => null);
+  if (supportCare?.supportRows?.length) {
+    const hanSupportByAlias = new Map(items.map((item) => [getSupportAlias(item.support), item]));
+    supportCare.supportRows = supportCare.supportRows
+      .map((row) => {
+        const member = hanSupportByAlias.get(getSupportAlias(row.support));
+        if (!member) return null;
+        return {
+          ...row,
+          supportName: member?.supportName || member?.support || row.support,
+          team: normalizeHanSupportTeamName(member.team),
+          level: member?.level || ""
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => String(a.team || "").localeCompare(String(b.team || "")) || String(a.supportName || "").localeCompare(String(b.supportName || "")) || Number(b.kpi || 0) - Number(a.kpi || 0));
+  }
+
   if (!items.length) {
     return { ok: false, message: "Không tìm thấy dữ liệu KPI realtime của phòng HAN support." };
   }
-  return { ok: true, room: "HAN_SUPPORT", url, month, monthLabel, checkedAt: new Date(), items, totals };
+  return { ok: true, room: "HAN_SUPPORT", url, month, monthLabel, checkedAt: new Date(), items, totals, supportCare };
 }
 
 export async function getHermesKpiSupportRealtime({ username, password, storageState = null, month = null }) {
@@ -3100,7 +3480,7 @@ export async function getHermesKpiSupportRealtime({ username, password, storageS
   try {
     if (storageState) {
       session = await createHermesBrowserContext(storageState);
-      const result = await readKpiSupportRealtimeFromPage(session.page, session.apiResponses, month);
+      const result = await readKpiSupportRealtimeFromPage(session.page, session.apiResponses, month, username);
       if (result.ok || !result.sessionExpired) return { ...result, storageState: await session.context.storageState().catch(() => storageState) };
       await session.browser.close().catch(() => {});
       session = null;
@@ -3110,7 +3490,7 @@ export async function getHermesKpiSupportRealtime({ username, password, storageS
     if (!login.ok) {
       return { ...login, sessionExpired: Boolean(storageState) || login.otpRequired, message: login.message || "Không thể đăng nhập Hermes để lấy KPI realtime." };
     }
-    const result = await readKpiSupportRealtimeFromPage(login.page, login.apiResponses, month);
+    const result = await readKpiSupportRealtimeFromPage(login.page, login.apiResponses, month, username);
     return { ...result, storageState: await login.context.storageState().catch(() => null) };
   } catch (error) {
     return { ok: false, message: `Lỗi lấy KPI realtime: ${error.message}` };
@@ -3286,3 +3666,5 @@ export async function getHermesNotifications({ username, password, storageState 
     await login.browser.close().catch(() => {});
   }
 }
+
+

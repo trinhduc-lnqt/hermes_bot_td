@@ -46,10 +46,11 @@ assertBotConfig();
 
 
 
-const bot = new Telegraf(config.telegramToken);
+const bot = new Telegraf(config.telegramToken, { handlerTimeout: Math.max(config.timeoutMs * 4, 180000) });
 const pendingActions = new Map();
 const workScheduleCache = new Map();
 const lastBotMessageByChat = new Map();
+const kpiLiveMessageIdsByChat = new Map();
 const startedAt = new Date();
 let instanceLockServer = null;
 let queue = Promise.resolve();
@@ -335,11 +336,46 @@ function requestOrderMonthKeyboard() {
   return Markup.inlineKeyboard(rows);
 }
 
+function pointKpiMonthKeyboard() {
+  const reportYear = 2026;
+  const parts = getLocalDateTimeParts(new Date());
+  const currentYear = Number(parts.year);
+  const currentMonth = Number(parts.month);
+  const maxEnabledMonth = currentYear > reportYear ? 12 : currentYear === reportYear ? currentMonth : 0;
+  const monthButtons = Array.from({ length: 12 }, (_, index) => {
+    const monthNumber = index + 1;
+    const monthText = String(monthNumber).padStart(2, "0");
+    const enabled = monthNumber <= maxEnabledMonth;
+    return enabled
+      ? Markup.button.callback(`${ICON.realtime} ${monthText}/${reportYear}`, `action:hermes_point_kpi_month:${reportYear}_${monthText}`)
+      : Markup.button.callback(`${ICON.locked} ${monthText}/${reportYear}`, "action:noop");
+  });
+  const rows = [];
+  for (let index = 0; index < monthButtons.length; index += 3) {
+    rows.push(monthButtons.slice(index, index + 3));
+  }
+  rows.push([Markup.button.callback(buttonText("home", "home"), "action:menu")]);
+  return Markup.inlineKeyboard(rows);
+}
+
 function requestOrderSummaryKeyboard() {
   return Markup.inlineKeyboard([
     [
       Markup.button.callback(`${ICON.back} Quay lại`, "action:request_order_month_menu"),
       Markup.button.callback(buttonText("homeMain", "home"), "action:menu")
+    ]
+  ]);
+}
+
+function pointKpiSummaryKeyboard(month = null) {
+  return Markup.inlineKeyboard([
+    [
+      ...(month ? [Markup.button.callback(buttonText("refreshLeaderBoard", "refresh"), `action:hermes_point_kpi_month:${month}`)] : []),
+      Markup.button.callback(buttonText("back", "back"), "action:hermes_point_kpi")
+    ],
+    [
+      Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi"),
+      Markup.button.callback(buttonText("home", "home"), "action:menu")
     ]
   ]);
 }
@@ -405,6 +441,8 @@ async function deleteLastBotMessage(ctx) {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
+  await deleteKpiLiveMessages(ctx);
+
   // Xoá tin nhắn vừa bấm nút (nếu có) để tránh dối mắt
   if (ctx.callbackQuery?.message?.message_id) {
     try {
@@ -422,6 +460,31 @@ async function deleteLastBotMessage(ctx) {
     } catch {}
   }
   lastBotMessageByChat.delete(chatId);
+}
+
+function rememberKpiLiveMessage(ctx, messageId) {
+  const chatId = ctx.chat?.id;
+  if (!chatId || !messageId) return;
+  const ids = kpiLiveMessageIdsByChat.get(chatId) || new Set();
+  ids.add(messageId);
+  kpiLiveMessageIdsByChat.set(chatId, ids);
+}
+
+async function deleteKpiLiveMessages(ctx) {
+  const chatId = ctx.chat?.id;
+  if (!chatId) return;
+
+  const ids = kpiLiveMessageIdsByChat.get(chatId);
+  if (!ids?.size) return;
+
+  const currentMessageId = ctx.callbackQuery?.message?.message_id;
+  for (const messageId of ids) {
+    if (messageId === currentMessageId) continue;
+    try {
+      await ctx.telegram.deleteMessage(chatId, messageId);
+    } catch {}
+  }
+  kpiLiveMessageIdsByChat.delete(chatId);
 }
 
 async function replyFresh(ctx, text, extra = undefined) {
@@ -1722,8 +1785,99 @@ function formatSupportDisplayName(value = "") {
   return raw ? raw.replace(/@ipos\.vn$/i, "") : "---";
 }
 
+function formatSupportCareKpiTable(supportCare = {}) {
+  if (!Number.isFinite(Number(supportCare.totalTickets))) return "";
+  const rows = Array.isArray(supportCare.rows) && supportCare.rows.length
+    ? supportCare.rows
+    : [{ label: "Support cá nhân", count: supportCare.totalTickets || 0, kpi: supportCare.pointPerTicket || 0.5, total: supportCare.kpi || 0 }];
+  const widths = [20, 6, 6, 7];
+  const borderTop = `┌${"─".repeat(widths[0])}┬${"─".repeat(widths[1])}┬${"─".repeat(widths[2])}┬${"─".repeat(widths[3])}┐`;
+  const borderMid = `├${"─".repeat(widths[0])}┼${"─".repeat(widths[1])}┼${"─".repeat(widths[2])}┼${"─".repeat(widths[3])}┤`;
+  const borderBottom = `└${"─".repeat(widths[0])}┴${"─".repeat(widths[1])}┴${"─".repeat(widths[2])}┴${"─".repeat(widths[3])}┘`;
+  const tableLines = [
+    borderTop,
+    `│${padRight("Hạng mục", widths[0])}│${padLeft("Phiếu", widths[1])}│${padLeft("KPI", widths[2])}│${padLeft("Tổng", widths[3])}│`,
+    borderMid,
+    ...rows.map((item) => `│${padRight(item.label || "Support", widths[0])}│${padLeft(formatKpiNumber(item.count), widths[1])}│${padLeft(formatKpiNumber(item.kpi), widths[2])}│${padLeft(formatKpiNumber(item.total), widths[3])}│`),
+    borderBottom
+  ];
+  return [
+    "",
+    `${ICON.total} <b>TỔNG KẾT KPI SUPPORT</b>`,
+    `<pre>${escapeHtml(tableLines.join("\n"))}</pre>`,
+    "",
+    "━━━━━━━━━━━━━━━━━━━━",
+    `${ICON.kpi} <b>KPI hotline cá nhân:</b> <b>${escapeHtml(formatKpiNumber(supportCare.kpi || 0))}</b> / ${escapeHtml(formatKpiNumber(supportCare.target || 135))}`,
+    `${ICON.upTrend} <b>Tỷ lệ KPI hotline:</b> <b>${escapeHtml(formatMetricValue(supportCare.percent || 0, 1))}%</b>`
+  ].join("\n");
+}
+
+function formatSupportProductKpiListChunks(supportCare = {}) {
+  const rows = Array.isArray(supportCare.supportRows) ? supportCare.supportRows : [];
+  if (!rows.length) return [];
+  const getSupportTarget = (team = "", level = "") => {
+    const normalizedTeam = String(team || "").toLowerCase();
+    const normalizedLevel = String(level || "").match(/\d+/)?.[0] || "1";
+    const glory = { 1: 230, 2: 260, 3: 290, 4: 320 };
+    const sucker = { 1: 110, 2: 122, 3: 135, 4: 146 };
+    return normalizedTeam.includes("glory") ? (glory[normalizedLevel] || glory[1]) : (sucker[normalizedLevel] || sucker[1]);
+  };
+  const summaryRows = [...rows.reduce((groups, item) => {
+    const key = `${item.team || "---"}|${item.support || item.supportName || "---"}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        support: item.support,
+        supportName: item.supportName || formatSupportDisplayName(item.support),
+        team: item.team || "---",
+        level: item.level || "",
+        totalKpi: 0,
+        totalTickets: 0
+      });
+    }
+    const group = groups.get(key);
+    const kpi = Number(item.kpi || 0);
+    const count = Number(item.count || 0);
+    group.totalKpi += kpi;
+    group.totalTickets += count;
+    return groups;
+  }, new Map()).values()].map((item) => {
+    const target = getSupportTarget(item.team, item.level);
+    return {
+      ...item,
+      target,
+      percent: target > 0 ? (item.totalKpi / target) * 100 : 0
+    };
+  }).sort((a, b) => String(a.team || "").localeCompare(String(b.team || "")) || b.percent - a.percent);
+  const widths = [20, 9, 19, 7];
+  const borderTop = `┌${"─".repeat(widths[0])}┬${"─".repeat(widths[1])}┬${"─".repeat(widths[2])}┬${"─".repeat(widths[3])}┐`;
+  const borderMid = `├${"─".repeat(widths[0])}┼${"─".repeat(widths[1])}┼${"─".repeat(widths[2])}┼${"─".repeat(widths[3])}┤`;
+  const borderBottom = `└${"─".repeat(widths[0])}┴${"─".repeat(widths[1])}┴${"─".repeat(widths[2])}┴${"─".repeat(widths[3])}┘`;
+  const groupedRows = summaryRows.reduce((groups, item) => {
+    const team = item.team || "---";
+    if (!groups.has(team)) groups.set(team, []);
+    groups.get(team).push(item);
+    return groups;
+  }, new Map());
+  const chunks = [...groupedRows.entries()].map(([team, members]) => {
+    const visibleRows = members.map((item) => `│${padRight(item.supportName || formatSupportDisplayName(item.support), widths[0])}│${padLeft(formatKpiNumber(item.totalKpi), widths[1])}│${padLeft(formatKpiNumber(item.totalTickets), widths[2])}│${padLeft(`${formatMetricValue(item.percent, 0)}%`, widths[3])}│`);
+    const tableLines = [
+      borderTop,
+      `│${padCenter("Nhân viên", widths[0])}│${padCenter("Tổng KPI", widths[1])}│${padCenter("Tổng ticket support", widths[2])}│${padCenter("KPI", widths[3])}│`,
+      borderMid,
+      ...visibleRows,
+      borderBottom
+    ];
+    return [
+      `${ICON.total} <b>LIST KPI SUPPORT - TEAM ${escapeHtml(team)}</b>`,
+      `<pre>${escapeHtml(tableLines.join("\n"))}</pre>`
+    ].join("\n");
+  });
+  return chunks;
+}
+
 function formatPointKpiRealtimeHtml(result = {}) {
   const totals = result.totals || {};
+  const supportCare = result.supportCare || {};
   const checkedAt = result.checkedAt ? new Date(result.checkedAt) : new Date();
   const items = [...(result.items || [])];
   const getTotalPoint = (item = {}) => Number(item.pointTotal || item.pointKpi || item.kpi || 0);
@@ -1769,6 +1923,7 @@ function formatPointKpiRealtimeHtml(result = {}) {
     "",
     "<b>Chi tiết KPI Live:</b>",
     `<pre>${escapeHtml(tableRows.join("\n"))}</pre>`,
+    formatSupportCareKpiTable(supportCare),
     "━━━━━━━━━━━━━━━━━━━━"
   ].filter(Boolean).join("\n");
 }
@@ -1781,6 +1936,31 @@ function padRight(value, width) {
 function padLeft(value, width) {
   const text = String(value ?? "");
   return text.length >= width ? text.slice(0, width) : " ".repeat(width - text.length) + text;
+}
+
+function padCenter(value, width) {
+  const text = String(value ?? "");
+  if (text.length >= width) return text.slice(0, width);
+  const left = Math.floor((width - text.length) / 2);
+  const right = width - text.length - left;
+  return " ".repeat(left) + text + " ".repeat(right);
+}
+
+function wrapTextByWidth(value = "", width = 40) {
+  const parts = String(value || "").split(" · ").filter(Boolean);
+  const lines = [];
+  let current = "";
+  for (const part of parts) {
+    const next = current ? `${current} · ${part}` : part;
+    if (next.length > width && current) {
+      lines.push(current);
+      current = part;
+    } else {
+      current = next;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines : [""];
 }
 
 function formatWorkloadTable(item) {
@@ -1828,12 +2008,17 @@ function formatKpiMonthTelegramHtml(monthData, item) {
   const monthLabel = String(monthData.month || "").replace("_", "/");
   const dummyLink = "https://t.me/hermes_kpi";
   const defaultOtherRatio = 0.069;
+  const hotlineAllowancePerTechnician = 600000;
+  const hotlineTechnicianCount = 12;
+  const hotlineAllowanceRevenue = hotlineAllowancePerTechnician * hotlineTechnicianCount;
   const baseTeamTotalPoint = Number(monthData.teamTotalPointSalary || 0);
   const adjustedTeamTotalPoint = baseTeamTotalPoint / (1 - defaultOtherRatio);
   const personalRatio = Number(item.pointSalary || 0) / Math.max(1, adjustedTeamTotalPoint);
   const allocationFactor = 0.506;
   const roomRevenueValue = parseMoneyValue(item.roomRevenue);
-  const personalRevenue = roomRevenueValue * allocationFactor * personalRatio;
+  const revenueAfterHotlineAllowance = Math.max(0, roomRevenueValue - hotlineAllowanceRevenue);
+  const personalRevenue = revenueAfterHotlineAllowance * allocationFactor * personalRatio;
+  const personalRevenueIncludingAllowance = personalRevenue + hotlineAllowancePerTechnician;
   return [
     `${ICON.point} <b>BÁO CÁO HIỆU SUẤT - KPI</b>`,
     `${ICON.calendar} <b>Giai đoạn:</b> <code>THÁNG ${monthLabel}</code>`,
@@ -1857,8 +2042,11 @@ function formatKpiMonthTelegramHtml(monthData, item) {
     `➕ Suất mặc định khác: <a href="${dummyLink}"><b>6.9%</b></a>`,
     `📈 Tỷ lệ cá nhân: <a href="${dummyLink}"><b>${(personalRatio * 100).toFixed(1)}%</b></a>`,
     `💰 Doanh thu phòng: <a href="${dummyLink}"><b>${escapeHtml(item.roomRevenue || "---")}</b></a>`,
+    `☎️ Doanh thu phụ cấp hotline: <a href="${dummyLink}"><b>${formatMoneyValue(hotlineAllowancePerTechnician)} x ${hotlineTechnicianCount} = ${formatMoneyValue(hotlineAllowanceRevenue)}</b></a>`,
+    `💰 Doanh thu sau phụ cấp hotline: <a href="${dummyLink}"><b>${formatMoneyValue(revenueAfterHotlineAllowance)}</b></a>`,
     `⚖️ Hệ số phân bổ nhóm (tạm tính): <a href="${dummyLink}"><b>50.6%</b></a>`,
     `💵 Doanh thu phân bổ cá nhân (tạm tính): <a href="${dummyLink}"><b>${formatMoneyValue(personalRevenue)}</b></a>`,
+    `💵 Doanh thu phân bổ cá nhân bao gồm phụ cấp (tạm tính): <a href="${dummyLink}"><b>${formatMoneyValue(personalRevenueIncludingAllowance)}</b></a>`,
     "━━━━━━━━━━━━━━━━━━━━",
     formatWorkloadTable(item),
     "",
@@ -1938,6 +2126,7 @@ function parseKpiMonthInput(text = "") {
 
 async function showPointKpiRealtime(ctx, month = null) {
   const monthText = month ? ` ${String(month).replace("_", "/")}` : "";
+  await deleteLastBotMessage(ctx);
   const loadingMessageId = await sendTempMessage(ctx, `${ICON.realtime} Đang mở KPI Live${monthText}...`);
   try {
     const account = await getHermesAccountOrReply(ctx);
@@ -1955,17 +2144,19 @@ async function showPointKpiRealtime(ctx, month = null) {
       await replyFresh(ctx, `Không tải được KPI Live.\n${String(result?.message || "Lỗi không xác định").slice(0, 700)}`, keyboard());
       return;
     }
-    await replyFresh(ctx, formatPointKpiRealtimeHtml(result), {
+    for (const chunk of formatSupportProductKpiListChunks(result.supportCare || {})) {
+      const sentChunk = await ctx.reply(chunk, { parse_mode: "HTML", disable_web_page_preview: true });
+      rememberKpiLiveMessage(ctx, sentChunk?.message_id);
+    }
+    const sentSummary = await ctx.reply(formatPointKpiRealtimeHtml(result), {
       parse_mode: "HTML",
       disable_web_page_preview: true,
-      ...Markup.inlineKeyboard([
-        [
-          Markup.button.callback(buttonText("refreshLeaderBoard", "refresh"), "action:hermes_point_kpi"),
-          Markup.button.callback(buttonText("kpi", "kpi"), "action:hermes_kpi"),
-          Markup.button.callback(buttonText("home", "home"), "action:menu")
-        ]
-      ])
+      ...pointKpiSummaryKeyboard(month)
     });
+    rememberKpiLiveMessage(ctx, sentSummary?.message_id);
+    if (sentSummary?.message_id && ctx.chat?.id) {
+      lastBotMessageByChat.set(ctx.chat.id, sentSummary.message_id);
+    }
   } finally {
     await deleteTempMessage(ctx, loadingMessageId);
   }
@@ -1987,9 +2178,6 @@ async function notifyKpiLiveReminder() {
     await saveHermesSession({ secret: config.botSecretKey, chatId: account.chatId, storageState: result.storageState });
   }
   const ids = await getAllowedTelegramIds();
-  const message = result?.ok
-    ? formatPointKpiRealtimeHtml(result)
-    : `Không tải được KPI Live tự động.\n${String(result?.message || "Lỗi không xác định").slice(0, 700)}`;
   const options = result?.ok
     ? {
         parse_mode: "HTML",
@@ -2005,7 +2193,14 @@ async function notifyKpiLiveReminder() {
     : keyboard();
   for (const telegramId of ids) {
     try {
-      await bot.telegram.sendMessage(telegramId, message, options);
+      if (result?.ok) {
+        for (const chunk of formatSupportProductKpiListChunks(result.supportCare || {})) {
+          await bot.telegram.sendMessage(telegramId, chunk, { parse_mode: "HTML", disable_web_page_preview: true });
+        }
+        await bot.telegram.sendMessage(telegramId, formatPointKpiRealtimeHtml(result), options);
+      } else {
+        await bot.telegram.sendMessage(telegramId, `Không tải được KPI Live tự động.\n${String(result?.message || "Lỗi không xác định").slice(0, 700)}`, options);
+      }
       console.log(`[Cron:kpi-live][GMT+7] Delivered to ${telegramId}`);
     } catch (error) {
       console.warn(`Cannot send KPI Live reminder to ${telegramId}:`, error.message);
@@ -2420,7 +2615,15 @@ bot.command("kpi", async (ctx) => {
 });
 
 bot.command(["pointkpi", "kpipoint"], async (ctx) => {
-  await showPointKpiRealtime(ctx, parseKpiMonthInput(ctx.message?.text || "") || null);
+  const month = parseKpiMonthInput(ctx.message?.text || "");
+  if (month) {
+    await showPointKpiRealtime(ctx, month);
+    return;
+  }
+  await replyFresh(ctx, `${ICON.realtime} <b>KPI Live 2026</b>\nChọn tháng để xem KPI Live và tổng KPI support theo sản phẩm.`, {
+    parse_mode: "HTML",
+    ...pointKpiMonthKeyboard()
+  });
 });
 
 bot.command("testtruc", async (ctx) => {
@@ -2651,8 +2854,11 @@ bot.action(/^action:hermes_kpi_month:(\d{4}_\d{2})$/, async (ctx) => {
 });
 
 bot.action("action:hermes_point_kpi", async (ctx) => {
-  await ctx.answerCbQuery("Đang mở KPI Live...");
-  await showPointKpiRealtime(ctx);
+  await ctx.answerCbQuery();
+  await replyFresh(ctx, `${ICON.realtime} <b>KPI Live 2026</b>\nChọn tháng để xem KPI Live và tổng KPI support theo sản phẩm. Tháng tương lai sẽ tự mở khi đến tháng.`, {
+    parse_mode: "HTML",
+    ...pointKpiMonthKeyboard()
+  });
 });
 
 bot.action(/^action:hermes_point_kpi_month:(\d{4}_\d{2})$/, async (ctx) => {
@@ -3106,13 +3312,3 @@ process.once("SIGTERM", async () => {
   bot.stop("SIGTERM");
   await releaseInstanceLock();
 });
-
-
-
-
-
-
-
-
-
-
